@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}稽核紀錄 — VCOD{% endblock %}
+{% block page_title %}稽核紀錄{% endblock %}
+{% block content %}
+
+<form method="get" action="/logs" class="filter-bar card" style="padding:12px 14px;gap:10px;">
+  <input type="search" name="q" value="{{ q }}" placeholder="搜尋帳號 / 詳情…" style="width:240px;" maxlength="100">
+  <select name="action" data-autosubmit>
+    <option value="">所有動作</option>
+    {% for a in actions %}<option value="{{ a }}" {{ 'selected' if action == a else '' }}>{{ a }}</option>{% endfor %}
+  </select>
+  <button type="submit" class="btn-sm">篩選</button>
+  {% if q or action %}<a class="btn btn-sm" href="/logs">清除</a>{% endif %}
+</form>
+
+<div class="card">
+  <table>
+    <thead><tr>
+      <th style="width:150px;">時間</th><th style="width:130px;">帳號</th>
+      <th style="width:120px;">來源 IP</th><th style="width:150px;">動作</th><th>詳情</th>
+    </tr></thead>
+    <tbody>
+      {% for log in logs %}
+      <tr>
+        <td class="muted nowrap">{{ log.ts.strftime('%m-%d %H:%M:%S') }}</td>
+        <td>{{ log.user or '—' }}</td>
+        <td class="mono">{{ log.ip or '—' }}</td>
+        <td><span class="badge badge-muted">{{ log.action }}</span></td>
+        <td style="font-size:13px;">{{ log.detail }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="muted" style="text-align:center;padding:40px 0;">尚無紀錄</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="muted" style="font-size:12px;">顯示最近 300 筆;逾保留天數的紀錄由背景每日自動清理(設定頁可調)。</p>
+{% endblock %}

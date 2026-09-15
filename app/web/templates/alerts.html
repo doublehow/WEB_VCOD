@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}警示 — VCOD{% endblock %}
+{% block page_title %}警示{% endblock %}
+{% block head %}
+<style>
+  .rule-table td { vertical-align:middle; }
+  .rule-table input[type=number] { width:90px; padding:4px 8px; }
+  .rule-table .desc { font-size:11.5px; color:var(--text3); }
+  .layer-row td { background:var(--bg3); font-weight:600; font-size:12.5px; color:var(--text2); }
+  .dur { font-variant-numeric:tabular-nums; white-space:nowrap; }
+</style>
+{% endblock %}
+{% block content %}
+
+<div class="tabs">
+  <a href="/alerts?tab=active" class="{{ 'on' if tab == 'active' else '' }}">進行中
+    {% if active_total %}<span class="badge badge-deny" style="margin-left:4px;">{{ active_total }}</span>{% endif %}</a>
+  <a href="/alerts?tab=history" class="{{ 'on' if tab == 'history' else '' }}">歷史</a>
+  <a href="/alerts?tab=rules" class="{{ 'on' if tab == 'rules' else '' }}">規則</a>
+</div>
+
+{% if saved %}<div class="flash flash-ok">✅ 規則已儲存,下一輪輪詢起生效(去抖計數重新累計)。</div>{% endif %}
+
+{# ======================= 進行中 ======================= #}
+{% if tab == 'active' %}
+<form method="get" action="/alerts" class="filter-bar card" style="padding:12px 14px;gap:10px;">
+  <input type="hidden" name="tab" value="active">
+  <input type="search" name="q" value="{{ q }}" placeholder="搜尋物件 / vCenter / 數值…" style="width:240px;" maxlength="100">
+  <select name="level" data-autosubmit>
+    <option value="">所有等級</option>
+    <option value="critical" {{ 'selected' if level == 'critical' else '' }}>嚴重</option>
+    <option value="warning" {{ 'selected' if level == 'warning' else '' }}>警告</option>
+  </select>
+  <button type="submit" class="btn-sm">篩選</button>
+  {% if q or level %}<a class="btn btn-sm" href="/alerts?tab=active">清除</a>{% endif %}
+  <span class="spacer"></span>
+  {% if suppression and (suppression.frozen_vcs or suppression.hosts_suppressed_vms) %}
+  <span class="muted" style="font-size:12px;">
+    {% if suppression.frozen_vcs %}⏸ {{ suppression.frozen_vcs|length }} 座 vCenter 資料過期,評估凍結;{% endif %}
+    {% if suppression.hosts_suppressed_vms %}⏸ {{ suppression.hosts_suppressed_vms }} 台 VM 因主機失聯 / 維護暫停評估{% endif %}
+  </span>{% endif %}
+</form>
+
+<div class="card" style="margin-bottom:20px;">
+  <table>
+    <thead><tr>
+      <th style="width:70px;">等級</th><th style="width:90px;">層面</th><th style="width:70px;">類型</th>
+      <th>物件</th><th style="width:150px;">vCenter</th><th style="width:180px;">規則</th><th>數值</th>
+      <th style="width:120px;">首次觸發</th><th style="width:110px;">持續</th>
+    </tr></thead>
+    <tbody>
+      {% for a in items %}
+      <tr class="{{ 'attention' if a.level == 'critical' else 'attention-warning' }}">
+        <td><span class="badge badge-{{ a.level_css }}">{{ a.level_label }}</span></td>
+        <td class="muted" style="font-size:12px;">{{ '客體 OS 層' if a.layer == 'guest' else '虛擬平台層' }}</td>
+        <td><span class="badge badge-muted">{{ {'vcenter': 'vCenter', 'host': '主機', 'datastore': '儲存區', 'vm': 'VM'}.get(a.target_type, a.target_type) }}</span></td>
+        <td><a class="link" style="font-weight:600;" href="{{ alert_href(a.rule, a.target_type, a.key.split('|', 1)[1]) }}">{{ a.target_name }}</a></td>
+        <td class="muted">{{ a.vc_name }}</td>
+        <td>{{ rule_labels.get(a.rule, a.rule) }}</td>
+        <td class="mono" style="font-size:12.5px;">{{ a.value }}</td>
+        <td class="muted">{{ a.first_at.strftime('%m-%d %H:%M:%S') }}</td>
+        <td class="dur muted">{% set d = (now - a.first_at).total_seconds()|int %}
+          {% if d < 60 %}{{ d }} 秒{% elif d < 3600 %}{{ d // 60 }} 分{% elif d < 86400 %}{{ d // 3600 }} 小時 {{ (d % 3600) // 60 }} 分{% else %}{{ d // 86400 }} 天 {{ (d % 86400) // 3600 }} 小時{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="9" class="muted" style="text-align:center;padding:40px 0;">
+        {% if q or level %}沒有符合條件的警示。{% else %}目前沒有進行中的警示 🎉{% endif %}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h3>vCenter 內建告警(已觸發)</h3>
+  <p class="sub">vCenter 自己的告警中心目前為黃 / 紅的項目,僅顯示{% if s.alert_forward_vcenter_alarms %}並外送新出現者{% else %};外送可於「規則」分頁開啟{% endif %}。</p>
+  {% if vc_alarms %}
+  <table>
+    <thead><tr><th style="width:70px;">狀態</th><th style="width:70px;">類型</th><th>物件</th><th style="width:170px;">vCenter</th><th>告警</th><th style="width:130px;">觸發時間</th><th style="width:70px;">已確認</th></tr></thead>
+    <tbody>
+      {% for a in vc_alarms %}
+      <tr>
+        <td><span class="badge {{ 'badge-deny' if a.status == 'red' else 'badge-warn' }}">{{ '紅' if a.status == 'red' else '黃' }}</span></td>
+        <td><span class="badge badge-muted">{{ a.entity_type }}</span></td>
+        <td><a class="link" style="font-weight:600;" href="{{ {'主機': '/compute', '儲存區': '/storage', 'VM': '/vms'}.get(a.entity_type, '/alerts') }}?focus={{ a.obj_key|urlencode }}">{{ a.entity_name }}</a></td>
+        <td class="muted">{{ a.vc }}{% if a.stale %} <span class="badge badge-warn">過期</span>{% endif %}</td>
+        <td>{{ a.alarm }}</td>
+        <td class="muted">{{ a.time.strftime('%m-%d %H:%M') if a.time else '—' }}</td>
+        <td>{% if a.acknowledged %}<span class="badge badge-muted">是</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted" style="margin:0;">目前沒有 vCenter 內建告警。</p>{% endif %}
+</div>
+
+{# ======================= 歷史 ======================= #}
+{% elif tab == 'history' %}
+<form method="get" action="/alerts" class="filter-bar card" style="padding:12px 14px;gap:10px;">
+  <input type="hidden" name="tab" value="history">
+  <input type="search" name="q" value="{{ q }}" placeholder="搜尋物件 / vCenter / 數值…" style="width:240px;" maxlength="100">
+  <select name="level" data-autosubmit>
+    <option value="">所有等級</option>
+    <option value="critical" {{ 'selected' if level == 'critical' else '' }}>嚴重</option>
+    <option value="warning" {{ 'selected' if level == 'warning' else '' }}>警告</option>
+  </select>
+  <button type="submit" class="btn-sm">篩選</button>
+  {% if q or level %}<a class="btn btn-sm" href="/alerts?tab=history">清除</a>{% endif %}
+</form>
+<div class="card">
+  <table>
+    <thead><tr>
+      <th style="width:130px;">時間</th><th style="width:80px;">事件</th><th style="width:70px;">等級</th>
+      <th style="width:70px;">類型</th><th>物件</th><th style="width:150px;">vCenter</th><th style="width:180px;">規則</th>
+      <th>數值</th><th style="width:100px;">持續</th><th style="width:150px;">通知</th>
+    </tr></thead>
+    <tbody>
+      {% for h in history %}
+      <tr>
+        <td class="muted nowrap">{{ h.at.strftime('%m-%d %H:%M:%S') }}</td>
+        <td><span class="badge {{ 'badge-allow' if h.event == 'resolved' else ('badge-manual' if h.event == 'changed' else 'badge-' ~ h.level_css) }}">{{ h.event_label }}</span></td>
+        <td><span class="badge badge-{{ h.level_css }}">{{ h.level_label }}</span></td>
+        <td><span class="badge badge-muted">{{ {'vcenter': 'vCenter', 'host': '主機', 'datastore': '儲存區', 'vm': 'VM'}.get(h.target_type, h.target_type) }}</span></td>
+        <td><a class="link" style="font-weight:600;" href="{{ alert_href(h.rule, h.target_type, h.key.split('|', 1)[1]) }}">{{ h.target_name }}</a></td>
+        <td class="muted">{{ h.vc_name }}</td>
+        <td>{{ rule_labels.get(h.rule, h.rule) }}</td>
+        <td class="mono" style="font-size:12.5px;">{{ h.value }}</td>
+        <td class="dur muted">{% if h.event == 'resolved' %}{% set d = h.duration_s|int %}
+          {% if d < 60 %}{{ d }} 秒{% elif d < 3600 %}{{ d // 60 }} 分{% elif d < 86400 %}{{ d // 3600 }} 小時 {{ (d % 3600) // 60 }} 分{% else %}{{ d // 86400 }} 天{% endif %}{% else %}—{% endif %}</td>
+        <td class="muted ellipsis" style="font-size:12px;max-width:150px;" title="{{ h.notified }}">{{ h.notified or '—' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="10" class="muted" style="text-align:center;padding:40px 0;">尚無歷史紀錄</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="muted" style="font-size:12px;">顯示最近 300 筆;逾保留天數(設定頁)的紀錄每日自動清理。</p>
+
+{# ======================= 規則 ======================= #}
+{% else %}
+<form method="post" action="/alerts/rules">
+<input type="hidden" name="_csrf" value="{{ csrf_token }}">
+<div class="card" style="margin-bottom:20px;">
+  <h3>全域參數</h3>
+  <p class="sub">用量類規則需連續 N 輪命中才觸發、N 輪未命中才解除;狀態類(失聯、無法存取、vCenter 失敗、心跳 red 等)1 輪即觸發。</p>
+  <div class="form-grid">
+    <label>去抖輪數 N({{ debounce_min }}–{{ debounce_max }};× 輪詢間隔 {{ poll_interval }} 秒 ≈ 反應時間)
+      <input name="debounce" type="number" min="{{ debounce_min }}" max="{{ debounce_max }}" value="{{ s.alert_debounce_rounds }}" {{ '' if can_write else 'disabled' }}></label>
+    <label>排除名稱樣式(逗號分隔,支援 * ?;不分大小寫;套用主機 / VM / 儲存區)
+      <input name="exclude_patterns" value="{{ s.alert_exclude_patterns|join(', ') }}" placeholder="vCLS-*, *-template" {{ '' if can_write else 'disabled' }}></label>
+    <label class="row"><input type="checkbox" name="notify_recovery" value="1" {{ 'checked' if s.alert_notify_recovery else '' }} {{ '' if can_write else 'disabled' }}>恢復時也通知</label>
+    <label class="row"><input type="checkbox" name="forward_vcenter_alarms" value="1" {{ 'checked' if s.alert_forward_vcenter_alarms else '' }} {{ '' if can_write else 'disabled' }}>vCenter 內建告警新出現時也外送(預設只顯示,避免與 vCenter 自身的 email 動作重複)</label>
+  </div>
+  <p class="muted" style="font-size:12px;margin:12px 0 0;">範本 VM 一律不評估;維護模式主機及其 VM 自動靜音;主機失聯時其 VM 暫停評估;vCenter 資料過期時該座凍結。通知管道(Telegram / SMTP)於 <a class="link" href="/settings">設定頁</a> 維護。</p>
+</div>
+
+<div class="card" style="margin-bottom:20px;">
+  <h3>規則與門檻</h3>
+  <p class="sub">門檻留空 = 使用預設值;「—」代表該等級不適用。用量類命中條件為 ≥ 門檻(剩餘空間為 ≤)。</p>
+  <table class="rule-table">
+    <thead><tr>
+      <th style="width:60px;">啟用</th><th style="width:220px;">規則</th><th style="width:70px;">對象</th><th style="width:60px;">類型</th>
+      <th style="width:130px;">警告門檻</th><th style="width:130px;">嚴重門檻</th><th>說明</th>
+    </tr></thead>
+    <tbody>
+      {% for layer, label in (('platform', '虛擬平台層'), ('guest', '客體 OS 層(VMware Tools)')) %}
+      <tr class="layer-row"><td colspan="7">{{ label }}</td></tr>
+      {% for r in rules if r.layer == layer %}
+      <tr>
+        <td><input type="checkbox" name="en_{{ r.key }}" value="1" {{ 'checked' if r.enabled else '' }} style="width:auto;" {{ '' if can_write else 'disabled' }}></td>
+        <td><b>{{ r.label }}</b><div class="desc mono">{{ r.key }}</div></td>
+        <td><span class="badge badge-muted">{{ r.target }}</span></td>
+        <td class="muted" style="font-size:12px;">{{ '用量' if r.kind == 'usage' else '狀態' }}</td>
+        {% if r.kind == 'state' %}
+        <td colspan="2" class="muted" style="font-size:12.5px;">固定等級:{{ r.fixed }}</td>
+        {% else %}
+        <td>{% if r.has_warning %}<span style="display:flex;align-items:center;gap:4px;">
+          <input type="number" step="any" name="warning_{{ r.key }}" value="{{ r.warning if r.warning != r.default_warning else '' }}" placeholder="{{ r.default_warning }}" {{ '' if can_write else 'disabled' }}><span class="muted" style="font-size:12px;">{{ r.unit }}</span></span>
+          {% else %}<span class="muted">—</span>{% endif %}</td>
+        <td>{% if r.has_critical %}<span style="display:flex;align-items:center;gap:4px;">
+          <input type="number" step="any" name="critical_{{ r.key }}" value="{{ r.critical if r.critical != r.default_critical else '' }}" placeholder="{{ r.default_critical }}" {{ '' if can_write else 'disabled' }}><span class="muted" style="font-size:12px;">{{ r.unit }}</span></span>
+          {% else %}<span class="muted">—</span>{% endif %}</td>
+        {% endif %}
+        <td class="desc">{{ r.description }}</td>
+      </tr>
+      {% endfor %}
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if can_write %}<button class="btn-primary" type="submit">儲存規則</button>{% else %}<p class="muted">唯讀帳號不可修改規則。</p>{% endif %}
+</form>
+{% endif %}
+{% endblock %}

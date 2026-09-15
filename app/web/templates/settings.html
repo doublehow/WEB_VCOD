@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block title %}設定 — VCOD{% endblock %}
+{% block page_title %}設定{% endblock %}
+{% block content %}
+
+{% if saved %}<div class="flash flash-ok">✅ 設定已儲存並立即生效(服務埠除外,改埠需編輯 config.json 後重啟)。</div>{% endif %}
+{% if error %}<div class="flash flash-err">⚠️ {{ error }}</div>{% endif %}
+{% if must_change_pw %}
+<div class="flash flash-err">⚠️ 本機 admin 目前為初始或不符規則的密碼,請於下方「本機管理員」設定新密碼(至少 {{ admin_pw_min }} 字元)後才能使用其他功能。</div>
+{% elif s.local_admin_initial %}
+<div class="flash flash-err">⚠️ 本機 admin 仍為系統產生的初始密碼(data/initial_admin_password.txt),請盡速變更。</div>
+{% endif %}
+
+<form method="post" action="/settings">
+<input type="hidden" name="_csrf" value="{{ csrf_token }}">
+
+<div class="card" style="margin-bottom:20px;">
+  <h3>輪詢與保留</h3>
+  <p class="sub">背景輪詢器每隔固定秒數以 PropertyCollector 批次抓取所有啟用的 vCenter;各頁面依同一間隔自動更新。
+    警示門檻與規則於 <a class="link" href="/alerts?tab=rules">警示 → 規則</a> 維護。</p>
+  <div class="form-grid">
+    <label>輪詢間隔(秒,{{ poll_min }}–{{ poll_max }})
+      <input name="poll_interval_seconds" type="number" min="{{ poll_min }}" max="{{ poll_max }}" value="{{ s.poll_interval_seconds }}"></label>
+    <label>稽核 / 警示歷史保留天數(0 = 不自動清理)
+      <input name="log_retention_days" type="number" min="0" max="3650" value="{{ s.log_retention_days }}"></label>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:20px;">
+  <h3>警示通知管道</h3>
+  <p class="sub">警示轉態(觸發 / 恢復 / 等級變更)每輪合併一則送出。Telegram 填 Bot Token + Chat ID 即啟用;SMTP 留空主機即停用。
+    Token / 密碼留空 = 不變更。</p>
+  <div class="form-grid">
+    <label>Telegram Bot Token
+      <input name="telegram_bot_token" type="password" autocomplete="off"
+             placeholder="{{ '已設定,留空不變更' if s.telegram_bot_token else '向 @BotFather 申請' }}"></label>
+    <label>Telegram Chat ID
+      <input name="telegram_chat_id" value="{{ s.telegram_chat_id }}" placeholder="個人或群組 ID(群組為負數)"></label>
+    <label>SMTP 主機(留空 = 停用郵件)
+      <input name="smtp_host" value="{{ s.smtp_host }}"></label>
+    <label>SMTP 埠
+      <input name="smtp_port" type="number" min="1" max="65535" value="{{ s.smtp_port }}"></label>
+    <label>SMTP 帳號(留空 = 不驗證,內部 relay 常見)
+      <input name="smtp_user" value="{{ s.smtp_user }}" autocomplete="off"></label>
+    <label>SMTP 密碼
+      <input name="smtp_password" type="password" placeholder="{{ '已設定,留空不變更' if s.smtp_password else '' }}" autocomplete="new-password"></label>
+    <label>寄件人
+      <input name="smtp_from" value="{{ s.smtp_from }}" placeholder="vcod@example.com"></label>
+    <label>收件人(逗號分隔)
+      <input name="smtp_to" value="{{ s.smtp_to }}" placeholder="noc@example.com, admin@example.com"></label>
+    <label class="row span2"><input type="checkbox" name="smtp_tls" value="1" {{ 'checked' if s.smtp_tls else '' }}>使用 TLS(STARTTLS;465 埠自動走 SMTPS)</label>
+  </div>
+  <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">
+    <div class="filter-bar" style="margin-bottom:8px;">
+      <button type="button" id="btn-notify-test">🔔 發送測試通知</button>
+      <span class="muted" style="font-size:12.5px;">對「已儲存」的管道各發一則;有修改請先按下方「儲存設定」再測試。</span>
+    </div>
+    <div id="notify-test-result" style="font-size:12.5px;"></div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:20px;">
+  <h3>AD(NTLM)驗證登入</h3>
+  <p class="sub">啟用後可用 AD 帳號登入;本機 admin 帳號恆為備援。密碼欄留空 = 不變更。</p>
+  <div class="form-grid">
+    <label class="row"><input type="checkbox" name="ad_enabled" value="1" {{ 'checked' if s.ad_enabled else '' }}>啟用 AD 驗證</label>
+    <span></span>
+    <label>AD Domain(NetBIOS 名,例:CORP)<input name="ad_domain" id="ad-domain" value="{{ s.ad_domain }}"></label>
+    <label>AD Server IPs(逗號分隔)<input name="ad_servers" id="ad-servers" value="{{ s.ad_servers|join(', ') }}"></label>
+    <label>Service Account 帳號<input name="ad_service_user" id="ad-svc-user" value="{{ s.ad_service_user }}" autocomplete="off"></label>
+    <label>Service Account 密碼(留空 = 不變更)
+      <input name="ad_service_password" id="ad-svc-pass" type="password" autocomplete="new-password"
+             placeholder="{{ '已設定,留空不變更' if s.ad_service_password else '' }}"></label>
+    <label>允許登入的 AD 群組(留空 = 不限制)<input name="ad_allowed_group" id="ad-group" value="{{ s.ad_allowed_group }}"></label>
+    <label>Base DN(留空 = 自動偵測)<input name="ad_base_dn" id="ad-basedn" value="{{ s.ad_base_dn }}" placeholder="例:DC=example,DC=com"></label>
+    <label class="row"><input type="checkbox" name="ad_use_ssl" id="ad-use-ssl" value="1" {{ 'checked' if s.ad_use_ssl else '' }}>
+      LDAPS 加密連線(636 埠;AD 需具有效憑證,關閉 = 明文 389)</label>
+    <label>未分權帳號的預設角色
+      <select name="default_role">
+        {% for rk, rlabel in role_labels.items() %}
+        <option value="{{ rk }}" {{ 'selected' if s.default_role == rk else '' }}>{{ rlabel }}</option>
+        {% endfor %}
+      </select></label>
+  </div>
+  <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">
+    <div class="filter-bar" style="margin-bottom:8px;">
+      <span class="muted" style="font-size:12.5px;">連線測試(選填測試帳密可驗證登入與群組)</span>
+      <input type="text" id="ad-test-user" placeholder="測試帳號" style="width:140px;" autocomplete="off">
+      <input type="password" id="ad-test-pass" placeholder="測試密碼" style="width:140px;" autocomplete="new-password">
+      <button type="button" id="btn-ad-test">連線測試</button>
+    </div>
+    <div id="ad-test-result" style="font-size:12.5px;line-height:1.9;white-space:pre-wrap;"></div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:20px;">
+  <h3>本機管理員(緊急備援登入)</h3>
+  <p class="sub">帳號固定為 <b>admin</b>,恆為管理者、不經 AD(防鎖死)。密碼至少 {{ admin_pw_min }} 字元;首次啟動由服務產生初始密碼(data/initial_admin_password.txt),登入後強制在此變更。忘記密碼可在伺服器執行 <code>python -m app.set_admin_password</code>(<code>--disable</code> = 停用本機登入,僅 AD)。留空 = 不變更。</p>
+  <div class="form-grid">
+    <label>本機 admin 密碼<input name="local_admin_password" type="password" placeholder="留空 = 不變更" autocomplete="new-password" minlength="{{ admin_pw_min }}"></label>
+  </div>
+</div>
+
+<button class="btn-primary" type="submit" style="margin-bottom:24px;">儲存設定</button>
+</form>
+
+<div class="card" id="roles">
+  <h3>帳號分權(帳號 → 角色)</h3>
+  <p class="sub">AD 群組控制「誰能登入」;登入後權限由此表決定 —— <b>管理者</b>:可管理 vCenter 與設定;
+    <b>唯讀</b>:只能檢視與匯出。未列於此表的帳號套用上方預設角色;本機 admin 恆為管理者。</p>
+  {% if can_write %}
+  <form method="post" action="/roles" class="form-grid" style="margin-bottom:16px;">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <label>帳號(AD sAMAccountName)<input name="username" required autocomplete="off" maxlength="100" placeholder="例:jsmith"></label>
+    <label>角色
+      <select name="role">
+        {% for rk, rlabel in role_labels.items() %}
+        <option value="{{ rk }}" {{ 'selected' if rk == 'full_admin' else '' }}>{{ rlabel }}({{ rk }})</option>
+        {% endfor %}
+      </select></label>
+    <div class="span2"><button class="btn-primary" type="submit">＋ 新增</button></div>
+  </form>
+  {% endif %}
+  {% if roles %}
+  <table>
+    <thead><tr><th>帳號</th><th>角色</th><th style="width:110px;">操作</th></tr></thead>
+    <tbody>
+      {% for r in roles %}
+      <tr>
+        <td class="mono">{{ r.username }}</td>
+        <td>{{ role_labels.get(r.role, r.role) }}({{ r.role }})</td>
+        <td>{% if can_write %}
+          <form method="post" action="/roles/{{ r.id }}/delete" style="display:inline;"
+                data-confirm="移除「{{ r.username }}」的分權?(回到預設角色)">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            <button type="submit" class="btn-sm">移除</button></form>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted" style="margin:0;">尚無分權設定 —— 非內建 admin 的登入帳號目前皆為預設角色。</p>{% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+  document.getElementById('btn-notify-test').addEventListener('click', () => {
+    const out = document.getElementById('notify-test-result');
+    out.textContent = '發送中…'; out.style.color = '';
+    fetch('/settings/notify-test', {method: 'POST',
+      headers: {'Accept': 'application/json', 'X-CSRF-Token': window.VCOD_CSRF}})
+      .then(r => r.json()).then(d => {
+        out.textContent = d.message || d.error || '';
+        out.style.color = d.ok ? 'var(--allow)' : 'var(--deny)';
+      }).catch(e => { out.textContent = '測試失敗:' + e; out.style.color = 'var(--deny)'; });
+  });
+
+  document.getElementById('btn-ad-test').addEventListener('click', () => {
+    const out = document.getElementById('ad-test-result');
+    out.textContent = '測試中…'; out.style.color = '';
+    fetch('/settings/ad-test', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-Token': window.VCOD_CSRF},
+      body: JSON.stringify({
+        ad_domain: document.getElementById('ad-domain').value,
+        ad_servers: document.getElementById('ad-servers').value,
+        ad_service_user: document.getElementById('ad-svc-user').value,
+        ad_service_password: document.getElementById('ad-svc-pass').value,
+        ad_allowed_group: document.getElementById('ad-group').value,
+        ad_base_dn: document.getElementById('ad-basedn').value,
+        ad_use_ssl: document.getElementById('ad-use-ssl').checked ? '1' : '',
+        test_username: document.getElementById('ad-test-user').value,
+        test_password: document.getElementById('ad-test-pass').value,
+      }),
+    }).then(r => r.json()).then(d => {
+      // 伺服器回傳文字一律 textContent 組裝,不進 innerHTML
+      out.textContent = '';
+      (d.steps || []).forEach(sp => {
+        const icon = sp.ok === true ? '✅' : (sp.ok === false ? '❌' : '⏭️');
+        const row = document.createElement('div'), strong = document.createElement('strong');
+        strong.textContent = sp.label;
+        row.append(icon + ' ', strong, ' — ' + (sp.detail || ''));
+        out.appendChild(row);
+      });
+      const sum = document.createElement('div');
+      sum.style.marginTop = '6px'; sum.style.color = d.ok ? 'var(--allow)' : 'var(--deny)';
+      sum.textContent = d.message || d.error || '';
+      out.appendChild(sum);
+    }).catch(e => { out.textContent = '測試失敗:' + e; out.style.color = 'var(--deny)'; });
+  });
+</script>
+{% endblock %}

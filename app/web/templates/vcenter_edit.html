@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}編輯 vCenter — VCOD{% endblock %}
+{% block page_title %}編輯 vCenter:{{ vc.name }}{% endblock %}
+{% block content %}
+
+{% if error %}<div class="flash flash-err">⚠️ {{ error }}</div>{% endif %}
+
+<div class="card" style="max-width:860px;">
+  <form method="post" action="/vcenters/{{ vc.id }}/edit" class="form-grid">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <label>顯示名稱(唯一)<input name="name" id="f-name" required maxlength="100" value="{{ vc.name }}"></label>
+    <label>主機(IP / FQDN)<input name="host" id="f-host" required maxlength="255" value="{{ vc.host }}"></label>
+    <label>連接埠<input name="port" id="f-port" type="number" min="1" max="65535" value="{{ vc.port }}"></label>
+    <label>帳號<input name="username" id="f-user" required maxlength="200" value="{{ vc.username }}" autocomplete="off"></label>
+    <label>密碼(留空 = 不變更)<input name="password" id="f-pass" type="password" autocomplete="new-password"
+                                       placeholder="{{ '已設定,留空不變更' if vc.password else '尚未設定' }}"></label>
+    <label>備註<input name="note" maxlength="300" value="{{ vc.note }}"></label>
+    <label class="row"><input type="checkbox" name="verify_ssl" id="f-ssl" value="1" {{ 'checked' if vc.verify_ssl else '' }}>
+      驗證 TLS 憑證(自簽憑證請取消勾選)</label>
+    <label class="row"><input type="checkbox" name="enabled" value="1" {{ 'checked' if vc.enabled else '' }}>
+      啟用輪詢(停用後保留設定但不連線、不顯示資料)</label>
+    <div class="span2" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <button class="btn-primary" type="submit">儲存</button>
+      <button type="button" id="btn-test">連線測試</button>
+      <a class="btn" href="/vcenters">返回</a>
+      <span id="test-result" class="muted" style="font-size:12.5px;"></span>
+    </div>
+  </form>
+  {% if vc.last_status == 'failed' and vc.last_error %}
+  <p class="muted" style="font-size:12.5px;margin:16px 0 0;">最近錯誤:<span style="color:var(--deny);">{{ vc.last_error }}</span></p>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+  // 密碼留空時沿用已存密碼測試 —— 伺服器端會要求主機 / 埠 / 帳號與已存值相同
+  document.getElementById('btn-test').addEventListener('click', () => {
+    const out = document.getElementById('test-result');
+    out.textContent = '測試中…'; out.style.color = '';
+    fetch('/vcenters/test', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-Token': window.VCOD_CSRF},
+      body: JSON.stringify({
+        id: {{ vc.id }},
+        host: document.getElementById('f-host').value,
+        port: document.getElementById('f-port').value,
+        username: document.getElementById('f-user').value,
+        password: document.getElementById('f-pass').value,
+        verify_ssl: document.getElementById('f-ssl').checked,
+      }),
+    }).then(r => r.json()).then(d => {
+      out.textContent = (d.ok ? '✅ ' : '❌ ') + (d.message || d.error || '');
+      out.style.color = d.ok ? 'var(--allow)' : 'var(--deny)';
+    }).catch(e => { out.textContent = '測試失敗:' + e; out.style.color = 'var(--deny)'; });
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Runtime data(SQLite、secret 金鑰、設定、日誌)
+data/
+config.json
+.env
+*.db
+*.log
+logs/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Claude Code 本地設定
+.claude/settings.local.json

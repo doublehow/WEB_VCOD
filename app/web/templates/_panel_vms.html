@@ -1,0 +1,60 @@
+{% import "_alert_badge.html" as ab %}
+<table class="vm-table">
+  <thead><tr>
+    <th class="sortable" data-sort="name" style="width:19%;">VM 名稱</th>
+    <th class="sortable" data-sort="state" style="width:84px;">電源狀態</th>
+    <th class="sortable" data-sort="cpu" data-type="num" style="width:58px;">vCPU</th>
+    <th class="sortable" data-sort="ram" data-type="num" style="width:80px;">RAM (GB)</th>
+    <th class="sortable" data-sort="guest" data-type="num" style="width:165px;" title="VMware Tools 回報的 Guest 檔案系統用量(已用 / 容量,最高掛載點 %)">Guest 用量</th>
+    <th class="sortable" data-sort="ip" style="width:128px;">IP 位址</th>
+    <th class="sortable" data-sort="net" style="width:14%;">Network Group</th>
+    <th class="sortable" data-sort="host" style="width:15%;">所在主機 (ESXi)</th>
+    <th class="sortable" data-sort="ds" style="width:12%;">儲存區</th>
+    <th class="sortable hide-narrow" data-sort="os" style="width:13%;">客體 OS</th>
+    <th class="sortable" data-sort="vc" style="width:12%;">vCenter</th>
+  </tr></thead>
+  <tbody>
+    {% for r in rows %}
+    <tr data-search="{{ r.search }}" data-key="{{ r.key }}" class="{{ 'attention' if r.alert_level == 'critical' else ('attention-warning' if r.alert_level == 'warning' else '') }}">
+      <td class="name" data-v="{{ r.name|lower }}">
+        <span class="hl" title="{{ r.name }}">{{ r.name }}</span>
+        {{ ab.badge(r.alerts) }}
+        {% if r.is_template %}<span class="badge badge-muted">範本</span>{% endif %}
+        {% if r.snapshot_count %}<span class="badge badge-muted" title="{{ r.snapshot_count }} 個快照,最舊 {{ r.snapshot_oldest_days }} 天">📷 {{ r.snapshot_count }}</span>{% endif %}
+        {% if r.stale %}<span class="badge badge-warn" title="資料過期">過期</span>{% endif %}
+        {% if r.hostname and r.hostname|lower != r.name|lower %}<span class="muted sub" style="font-size:11.5px;" title="{{ r.hostname }}">{{ r.hostname }}</span>{% endif %}
+      </td>
+      <td data-v="{{ '0' if r.is_on else ('1' if r.power_state == 'suspended' else '2') }}">
+        {% if r.is_on %}<span class="badge badge-allow">ON</span>
+        {% elif r.power_state == 'suspended' %}<span class="badge badge-warn">暫停</span>
+        {% else %}<span class="badge badge-muted">OFF</span>{% endif %}
+      </td>
+      <td class="mono tnum" data-v="{{ r.num_cpu }}" title="CPU 使用 {{ r.cpu_usage_mhz }} MHz({{ r.cpu_pct }}%{% if r.cpu_turbo %},已達上限、Turbo 中{% endif %})· Ready {{ r.ready_pct }}%">{{ r.num_cpu or '—' }}</td>
+      <td class="mono tnum" data-v="{{ r.memory_gb }}">{{ r.memory_gb if r.memory_gb else '—' }}</td>
+      <td data-v="{{ r.guest_disk_max_pct if r.guest_disk_max_pct is not none else -1 }}">
+        {% if r.guest_disks %}
+        <div style="display:flex;align-items:center;gap:8px;" data-tip-flat title="{% for d in r.guest_disks %}{{ d.path }} {{ d.used_gb|gb }} / {{ d.capacity_gb|gb }} GB({{ d.pct }}%){% if not loop.last %}&#10;{% endif %}{% endfor %}">
+          <div class="pbar {{ r.guest_disk_max_pct|usage_tier }}" style="flex:1;min-width:50px;"><div style="width:{{ r.guest_disk_max_pct }}%;"></div></div>
+          <span class="mono tnum tier-{{ r.guest_disk_max_pct|usage_tier }}" style="font-size:12px;white-space:nowrap;">{{ r.guest_disk_max_pct|round|int }}%</span>
+        </div>
+        <div class="muted mono sub" style="font-size:11px;">{{ r.guest_used_gb|gb }} / {{ r.guest_capacity_gb|gb }} GB · {{ r.guest_disks|length }} 掛載</div>
+        {% elif r.is_on and not r.tools_running %}<span class="muted" style="font-size:12px;" title="VMware Tools 未執行,無 Guest 資料">無 Tools</span>
+        {% else %}<span class="muted">—</span>{% endif %}
+      </td>
+      <td data-v="{{ r.ips[0] if r.ips else 'zzz' }}"><div class="ml mono" style="font-size:12px;">
+        {% for ip in r.ips %}<div class="hl" title="{{ ip }}">{{ ip }}</div>{% else %}<div class="muted">—</div>{% endfor %}</div></td>
+      <td data-v="{{ (r.networks[0] if r.networks else 'zzz')|lower }}"><div class="ml" style="font-size:12.5px;">
+        {% for n in r.networks %}<div class="hl" title="{{ n }}">{{ n }}</div>{% else %}<div class="muted">—</div>{% endfor %}</div></td>
+      <td class="ell" data-v="{{ r.host|lower }}" title="{{ r.host }}{% if r.cluster %} · {{ r.cluster }}{% endif %}"><span class="hl">{{ r.host or '—' }}</span>
+        {% if r.cluster %}<span class="muted sub" style="font-size:11.5px;">{{ r.cluster }}</span>{% endif %}</td>
+      <td data-v="{{ (r.datastores[0] if r.datastores else 'zzz')|lower }}"><div class="ml" style="font-size:12.5px;">
+        {% for d in r.datastores %}<div class="hl" title="{{ d }}">{{ d }}</div>{% else %}<div class="muted">—</div>{% endfor %}</div></td>
+      <td class="muted hide-narrow wrap" style="font-size:12px;" data-v="{{ r.guest_os|lower }}" title="{{ r.guest_os }}">{{ r.guest_os or '—' }}</td>
+      <td class="ell" data-v="{{ r.vc|lower }}" title="{{ r.vc }}"><span class="hl">{{ r.vc }}</span></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="11" class="muted" style="text-align:center;padding:40px 0;">
+      {% if polled_at %}沒有 VM 資料 — 請確認 vCenter 連線狀態。{% else %}等待首次輪詢…{% endif %}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>

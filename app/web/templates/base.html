@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}VCOD{% endblock %}</title>
+  <script nonce="{{ csp_nonce }}">
+    // 主題須在 CSS 套用前決定,避免載入閃爍:localStorage > 系統偏好
+    (function () {
+      var t = localStorage.getItem('vcod-theme');
+      if (t !== 'dark' && t !== 'light') {
+        t = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches
+            ? 'dark' : 'light';
+      }
+      document.documentElement.dataset.theme = t;
+      window.vcodToggleTheme = function () {
+        var next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+        document.documentElement.dataset.theme = next;
+        localStorage.setItem('vcod-theme', next);
+      };
+    })();
+  </script>
+  <style>
+    :root {
+      /* Veeam 式側欄主控台(與 BaselineGuard / ERS / ALMS 同款配色) */
+      color-scheme:light;
+      --bg:#f2f4f9; --bg2:#e8ebf4; --bg3:#dce1ee; --border:#c4cadb;
+      --text:#1a2035; --text2:#4a5572; --text3:#8a95aa;
+      --accent:#2d6ee0; --accent2:#1f56c4;
+      --allow:#16a34a; --deny:#dc2626; --warn:#b45309; --manual:#7c3aed;
+      --sky:#0ea5e9; --teal:#0d9488; --yellow:#ca8a04; --orange:#ea580c;
+      --side-bg:#1a2035; --side-bg2:#252d4a; --side-text:#9aa3bd; --side-active:#ffffff;
+      --row-line:rgba(211,218,227,.6); --row-hover:rgba(233,237,242,.6);
+      --mark:#fde68a;
+      --radius:8px;
+      --mono:'Cascadia Code','Fira Code','JetBrains Mono',ui-monospace,monospace;
+    }
+    html[data-theme="dark"] {
+      color-scheme:dark;
+      --bg:#111627; --bg2:#1a2035; --bg3:#242c49; --border:#333d63;
+      --text:#e7ebf7; --text2:#b3bcd6; --text3:#7d89ab;
+      --accent:#5b8def; --accent2:#7ba4f5;
+      --allow:#34d399; --deny:#f87171; --warn:#fbbf24; --manual:#a78bfa;
+      --sky:#38bdf8; --teal:#2dd4bf; --yellow:#facc15; --orange:#fb923c;
+      --side-bg:#0f1425; --side-bg2:#1c2440; --side-text:#8d97b8;
+      --row-line:rgba(64,74,110,.5); --row-hover:rgba(36,44,73,.6);
+      --mark:#854d0e;
+    }
+    * { box-sizing:border-box; }
+    html { height:100%; }
+    body { margin:0; font-family:'Segoe UI', system-ui, sans-serif; font-size:14px;
+           background:var(--bg); color:var(--text); display:flex; min-height:100vh; }
+
+    /* ===== 左側導覽欄 ===== */
+    aside { width:212px; flex-shrink:0; background:var(--side-bg); color:var(--side-text);
+            display:flex; flex-direction:column;
+            position:sticky; top:0; height:100vh; overflow-y:auto; }
+    .brand { display:flex; align-items:center; gap:9px; padding:16px 18px 14px;
+             color:#fff; font-weight:600; font-size:16px;
+             border-bottom:1px solid rgba(255,255,255,.07); }
+    .brand svg { color:var(--accent); flex-shrink:0; }
+    .brand small { display:block; font-weight:400; font-size:10px; color:var(--side-text); }
+    nav { padding:10px 0; flex:1; }
+    nav a { display:flex; align-items:center; gap:11px; padding:10px 18px;
+            color:var(--side-text); text-decoration:none; font-size:13.5px;
+            border-left:3px solid transparent; transition:all .12s; }
+    nav a:hover { background:var(--side-bg2); color:var(--side-active); }
+    nav a.active { background:var(--side-bg2); color:var(--side-active);
+                   border-left-color:var(--accent); }
+    .side-foot { padding:12px 18px; font-size:11px; color:#6b7585;
+                 border-top:1px solid rgba(255,255,255,.07); }
+
+    /* ===== 主區 ===== */
+    main { flex:1; min-width:0; display:flex; flex-direction:column; }
+    .topbar { display:flex; align-items:center; justify-content:space-between;
+              padding:14px 26px; background:var(--bg2);
+              border-bottom:1px solid var(--border); }
+    .topbar h1 { margin:0; font-size:17px; font-weight:600;
+                 overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .topbar .actions { display:flex; align-items:center; gap:10px; flex-shrink:0; }
+    .content { padding:24px 26px; flex:1; width:100%; max-width:1600px; }
+
+    .card { background:var(--bg2); border:1px solid var(--border);
+            border-radius:var(--radius); padding:18px 20px; overflow-x:auto; }
+    .card h3 { margin:0 0 4px; font-size:14px; }
+    .card .sub { color:var(--text3); font-size:12px; margin:0 0 14px; }
+    .muted { color:var(--text3); }
+    a.link { color:var(--accent); text-decoration:none; }
+    button, .btn { font:inherit; padding:7px 14px; border-radius:var(--radius);
+            border:1px solid var(--border); background:var(--bg3); color:var(--text);
+            cursor:pointer; }
+    .btn-primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+    .btn-primary:hover { background:var(--accent2); }
+    .btn-sm { padding:4px 10px; font-size:12.5px; }
+    a.btn { text-decoration:none; display:inline-block; }
+
+    /* ===== 提示 ===== */
+    .flash { padding:10px 14px; border-radius:var(--radius); margin-bottom:16px; font-size:13.5px; }
+    .flash-ok { background:color-mix(in srgb, var(--allow) 10%, transparent);
+                border:1px solid color-mix(in srgb, var(--allow) 30%, transparent); color:var(--allow); }
+    .flash-err { background:color-mix(in srgb, var(--deny) 8%, transparent);
+                 border:1px solid color-mix(in srgb, var(--deny) 25%, transparent); color:var(--deny); }
+
+    /* ===== 統計卡 ===== */
+    .stat-grid { display:grid; gap:16px; margin-bottom:20px;
+                 grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); }
+    .stat-label { font-size:12px; }
+    .stat-value { font-size:30px; font-weight:700; font-variant-numeric:tabular-nums; }
+    .stat-value small { font-size:14px; font-weight:500; color:var(--text3); }
+
+    /* ===== 表格 ===== */
+    table { width:100%; border-collapse:collapse; font-size:13.5px; min-width:640px; }
+    th { text-align:left; padding:8px 10px; color:var(--text3); font-weight:600;
+         border-bottom:1px solid var(--border); white-space:nowrap; }
+    td { padding:8px 10px; border-bottom:1px solid var(--row-line); vertical-align:top; }
+    tbody tr:hover { background:var(--row-hover); }
+    th.sortable { cursor:pointer; user-select:none; }
+    th.sortable:hover { color:var(--text); }
+    th.sortable::after { content:' ↕'; opacity:.4; font-size:11px; }
+    th.sortable.asc::after { content:' ▲'; opacity:1; color:var(--accent); }
+    th.sortable.desc::after { content:' ▼'; opacity:1; color:var(--accent); }
+    .mono { font-family:var(--mono); font-size:12.5px; }
+    .tnum { font-variant-numeric:tabular-nums; }
+    .nowrap { white-space:nowrap; }
+    .ellipsis { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+    /* ===== 自訂懸浮提示(接管所有 title):即時顯示、多行時首行粗體、空行 = 分隔線、路徑 / MAC 等寬 ===== */
+    #vtip { position:fixed; left:0; top:0; z-index:9999; max-width:min(460px, calc(100vw - 16px));
+            padding:7px 11px; border-radius:8px; font-size:12.5px; line-height:1.5; pointer-events:none;
+            background:var(--side-bg); color:#e7ebf7; border:1px solid var(--side-bg2);
+            box-shadow:0 6px 20px rgba(0,0,0,.28); overflow-wrap:anywhere; white-space:normal;
+            opacity:0; transform:translateY(3px); transition:opacity .1s, transform .1s; }
+    #vtip.show { opacity:1; transform:none; }
+    html[data-theme="dark"] #vtip { background:#2b3453; border-color:#4a5680; }
+    #vtip .t-head { font-weight:700; }
+    #vtip .t-sep  { border-top:1px solid currentColor; opacity:.25; margin:5px 0; }
+    #vtip .t-mono { font-family:var(--mono); font-size:12px; }
+    #vtip .t-ind  { padding-left:12px; }
+
+    /* ===== 徽章 / 點 ===== */
+    .badge { display:inline-block; padding:2px 9px; border-radius:99px;
+             font-size:12px; font-weight:600; white-space:nowrap; vertical-align:middle; }
+    .badge-allow  { color:var(--allow);  background:color-mix(in srgb, var(--allow) 12%, transparent); }
+    .badge-deny   { color:var(--deny);   background:color-mix(in srgb, var(--deny) 12%, transparent); }
+    .badge-warn   { color:var(--warn);   background:color-mix(in srgb, var(--warn) 14%, transparent); }
+    .badge-manual { color:var(--manual); background:color-mix(in srgb, var(--manual) 12%, transparent); }
+    .badge-muted  { color:var(--text3);  background:var(--bg3); }
+    /* vCenter overallStatus 於深色卡片標頭上的字色:黃就是黃、紅就是紅(不隨主題變) */
+    .badge-yellow { color:#facc15; background:rgba(250,204,21,.18); }
+    .badge-red    { color:#f87171; background:rgba(248,113,113,.20); }
+    .dot { display:inline-block; width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+    .dot-ok { background:var(--allow); } .dot-bad { background:var(--deny); }
+    .dot-wait { background:var(--warn); } .dot-off { background:var(--text3); }
+
+    /* ===== 用量長條(五段色階;門檻由 webutil.usage_tier 統一)===== */
+    .pbar { height:8px; background:var(--bg3); border-radius:4px; overflow:hidden; min-width:60px; }
+    .pbar > div { height:100%; background:var(--allow); border-radius:4px; transition:width .4s; }
+    .pbar.u1 > div { background:var(--allow); }   .tier-u1 { color:var(--allow); }
+    .pbar.u2 > div { background:var(--teal); }    .tier-u2 { color:var(--teal); }
+    .pbar.u3 > div { background:var(--yellow); }  .tier-u3 { color:var(--yellow); }
+    .pbar.u4 > div { background:var(--orange); }  .tier-u4 { color:var(--orange); }
+    .pbar.u5 > div { background:var(--deny); }    .tier-u5 { color:var(--deny); }
+
+    /* ===== 資源卡片(運算 / 儲存 / 網路)===== */
+    .grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fill, minmax(360px, 1fr)); }
+    .vcard { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius);
+             display:flex; flex-direction:column; overflow:hidden; min-width:0; }
+    .vcard-head { padding:11px 14px; color:#fff; display:flex; flex-direction:column; gap:2px; }
+    .head-compute { background:#3b4467; } .head-storage { background:#b45f36; }
+    .head-network { background:#1d7ea8; }
+    html[data-theme="dark"] .head-compute { background:#2c3450; }
+    html[data-theme="dark"] .head-storage { background:#8a4726; }
+    html[data-theme="dark"] .head-network { background:#155f80; }
+    .vcard-title { font-weight:600; font-size:14.5px; display:flex; align-items:center; gap:8px;
+                   min-width:0; }
+    .vcard-title .hl { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .vcard-sub { font-size:11.5px; opacity:.8; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .vcard-body { padding:12px 14px 6px; display:flex; flex-direction:column; gap:9px; }
+    .meter-l { display:flex; align-items:baseline; gap:6px; font-size:12.5px; margin-bottom:4px;
+               flex-wrap:wrap; }
+    .meter-l b { font-weight:600; }
+    .meter-l .right { margin-left:auto; font-size:11.5px; }
+    .kv { font-size:11.5px; color:var(--text3); line-height:1.6; }
+    .kv div { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .vcard-list-head { display:flex; align-items:center; justify-content:space-between;
+                       padding:8px 14px 4px; font-size:12.5px; font-weight:600; color:var(--text2); }
+    .vm-list { padding:4px 10px 10px; display:flex; flex-direction:column; gap:4px;
+               max-height:264px; overflow-y:auto; }
+    .vm-row { display:flex; align-items:center; gap:8px; padding:5px 8px; border-radius:6px;
+              background:var(--bg); border:1px solid var(--row-line); font-size:13px; min-width:0; }
+    .vm-row.off { opacity:.62; }
+    .vm-row:hover { background:var(--row-hover); }
+    .vm-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .vm-val { flex-shrink:0; color:var(--text2); font-size:12px; text-align:right; }
+    .vm-row.hidden, .vcard.hidden, tr.hidden, .vc-group.hidden { display:none; }
+
+    /* ===== 依 vCenter 分組的區段 ===== */
+    .vc-group { margin-bottom:22px; }
+    .vc-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; cursor:pointer;
+               user-select:none; padding:8px 12px; margin-bottom:12px;
+               background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius);
+               border-left:4px solid var(--accent); }
+    .vc-head:hover { background:var(--bg3); }
+    .vc-caret { color:var(--text3); font-size:13px; width:12px; transition:transform .15s; }
+    .vc-group.collapsed .vc-caret { transform:rotate(-90deg); }
+    .vc-group.collapsed .vc-body { display:none; }
+    .vc-name { font-weight:600; font-size:15px; }
+    .vc-meta { font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; flex:1; }
+    .vc-count { font-size:12.5px; font-variant-numeric:tabular-nums; margin-left:auto; white-space:nowrap; }
+    .empty { color:var(--text3); font-style:italic; font-size:12.5px; padding:8px 14px 12px; }
+    mark { background:var(--mark); color:inherit; border-radius:2px; padding:0 1px; }
+
+    /* 需關注(用量 ≥ 門檻 / 無法存取):呼吸燈邊框。
+       光暈明暗變化不是位移,刻意**不**受 prefers-reduced-motion 限制——維運機常關閉
+       Windows 動畫效果,若依偏好停用會讓警示失去辨識度(2026-09-15 UAT 實測決定)。 */
+    /* 卡片有任何進行中警示(警告 / 嚴重皆為用量 ≥ 80% 或狀態異常)→ 紅色呼吸燈,單一顏色
+       (2026-09-15 使用者決定:不用橘色區分等級,等級由小籤 ⚠️/🔴 呈現);
+       外圈光暈 4→12px + 相框內側同步呼吸的內暈(inset) */
+    @keyframes vcod-breathe {
+      0%, 100% { box-shadow:0 0 0 4px  color-mix(in srgb, var(--deny) 70%, transparent),
+                            inset 0 0 0 2px color-mix(in srgb, var(--deny) 70%, transparent); }
+      50%      { box-shadow:0 0 0 12px color-mix(in srgb, var(--deny) 8%, transparent),
+                            inset 0 0 14px 4px color-mix(in srgb, var(--deny) 22%, transparent); }
+    }
+    .vcard.attention-critical, .vcard.attention-warning {
+      border-color:var(--deny); animation:vcod-breathe 2.4s ease-in-out infinite; }
+    .vcard.attention-critical:hover, .vcard.attention-warning:hover { animation-play-state:paused; }
+    tbody tr.attention td:first-child { box-shadow:inset 3px 0 0 var(--deny); }
+    tbody tr.attention-warning td:first-child { box-shadow:inset 3px 0 0 var(--orange); }
+    /* 卡片 / 列上的警示小籤 */
+    .al-badge { display:inline-flex; align-items:center; gap:4px; padding:1px 7px; border-radius:99px;
+                font-size:11px; font-weight:600; white-space:nowrap; cursor:help; }
+    .al-critical { color:var(--deny); background:color-mix(in srgb, var(--deny) 14%, transparent); }
+    .al-warning  { color:var(--orange); background:color-mix(in srgb, var(--orange) 16%, transparent); }
+    .vm-row .al-badge { padding:0 6px; }
+
+    /* ===== 表單 ===== */
+    .form-grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:12px 18px; }
+    .form-grid label { display:flex; flex-direction:column; gap:5px; font-size:12.5px; color:var(--text2); }
+    .form-grid label.row { flex-direction:row; align-items:center; gap:8px; }
+    .form-grid label.row input { width:auto; }
+    .span2 { grid-column:1/-1; }
+    input, select, textarea { font:inherit; padding:7px 10px; border-radius:var(--radius);
+                    border:1px solid var(--border); background:var(--bg); color:var(--text); width:100%; }
+    input:focus, select:focus, textarea:focus { outline:2px solid var(--accent); outline-offset:-1px; }
+
+    /* ===== 篩選列 ===== */
+    .filter-bar { display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap; align-items:center; }
+    .filter-bar input, .filter-bar select { width:auto; }
+    .filter-bar .spacer { flex:1; }
+    .filter-bar .count { font-size:12.5px; color:var(--text3); font-variant-numeric:tabular-nums; }
+    .tabs { display:flex; gap:4px; margin-bottom:16px; flex-wrap:wrap; }
+    .tabs a { padding:7px 14px; border-radius:var(--radius); text-decoration:none;
+              color:var(--text2); font-size:13px; border:1px solid transparent; }
+    .tabs a:hover { background:var(--bg3); }
+    .tabs a.on { background:var(--bg2); border-color:var(--border); color:var(--text); font-weight:600; }
+
+    /* ===== 圖表(純 CSS)===== */
+    .chart-grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));
+                  margin-bottom:20px; }
+    .donut-wrap { display:flex; align-items:center; gap:22px; flex-wrap:wrap; }
+    .donut { width:132px; height:132px; border-radius:50%; flex-shrink:0;
+             background:conic-gradient(var(--_g)); position:relative; }
+    .donut::after { content:''; position:absolute; inset:24%; border-radius:50%; background:var(--bg2); }
+    .donut-mid { position:absolute; inset:0; display:flex; flex-direction:column;
+                 align-items:center; justify-content:center; z-index:1; }
+    .donut-mid b { font-size:24px; font-weight:700; line-height:1; }
+    .donut-mid span { font-size:11px; color:var(--text3); }
+    .legend { display:flex; flex-direction:column; gap:7px; font-size:13px; }
+    .legend .row { display:flex; align-items:center; gap:8px; }
+    .legend .sw { width:12px; height:12px; border-radius:3px; flex-shrink:0; }
+    .legend .n { color:var(--text2); margin-left:auto; padding-left:14px; font-variant-numeric:tabular-nums; }
+    .bars { display:flex; flex-direction:column; gap:8px; }
+    .bar-row { display:grid; grid-template-columns:minmax(120px,160px) 1fr 52px; align-items:center;
+               gap:10px; font-size:12.5px; }
+    .bar-row .lbl { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text2); }
+    .bar-row .n { text-align:right; font-variant-numeric:tabular-nums; }
+
+    /* ===== RWD ===== */
+    @media (max-width: 980px) {
+      body { flex-direction:column; }
+      aside { width:100%; position:static; height:auto; overflow-y:visible; }
+      .brand { padding:10px 16px 8px; }
+      nav { display:flex; flex:0 0 auto; padding:0 8px; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+      nav a { padding:10px 13px; white-space:nowrap; border-left:none; border-bottom:3px solid transparent; }
+      nav a.active { border-left:none; border-bottom-color:var(--accent); }
+      .side-foot { display:none; }
+      .topbar { padding:12px 16px; }
+      .content { padding:18px 16px; }
+      .grid { grid-template-columns:1fr; }
+    }
+    @media (max-width: 640px) {
+      .form-grid { grid-template-columns:1fr; }
+      .form-grid label, .form-grid > div { grid-column:auto !important; }
+      input, select { font-size:16px; }
+      .content { padding:14px 10px; }
+      .card { padding:14px 12px; }
+      .topbar h1 { font-size:15.5px; }
+      table { font-size:12.5px; }
+      .topbar .user { display:none; }
+    }
+  </style>
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <aside>
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="3" width="20" height="14" rx="2"/>
+        <path d="M8 21h8M12 17v4M6 8h4M6 12h8"/>
+      </svg>
+      <div>VCOD<small>vCenter Overview Dashboard</small></div>
+    </div>
+    <nav>
+      {% for key, url, label in nav %}
+      <a href="{{ url }}" class="{{ 'active' if active == key else '' }}">{{ label }}</a>
+      {% endfor %}
+    </nav>
+    <div class="side-foot">vCenter 維運總覽</div>
+  </aside>
+  <main>
+    <div class="topbar">
+      <h1>{% block page_title %}{% endblock %}</h1>
+      <div class="actions">
+        <span id="vc-indicator" class="muted" title="vCenter 連線 / 最後更新"
+              style="display:flex;align-items:center;gap:6px;font-size:12.5px;">
+          <span id="vc-dot" class="dot dot-wait"></span><span id="vc-label">…</span>
+        </span>
+        {% if user_name %}<span class="muted user" style="font-size:12.5px;">
+          {{ user_name }} · {{ role_label }}</span>
+        <form method="post" action="/logout" style="display:inline;">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <button class="btn btn-sm" type="submit">登出</button>
+        </form>{% endif %}
+        <button id="vcod-theme-btn" type="button" title="切換主題" class="btn-sm">🌓</button>
+        {% block actions %}{% endblock %}
+      </div>
+    </div>
+    <div class="content">{% block content %}{% endblock %}</div>
+  </main>
+  <script nonce="{{ csp_nonce }}">
+    window.VCOD_CSRF = {{ csrf_token|tojson }};
+    window.VCOD_POLL_MS = {{ (poll_interval or 30) * 1000 }};
+    // CSP script-src 無 'unsafe-inline':模板不得用 onclick / onchange / onsubmit 內嵌事件屬性,
+    // 一律在此以事件委派綑綁(data-autosubmit:變更即送出;data-confirm:送出前確認)
+    document.addEventListener('change', (e) => {
+      const el = e.target;
+      if (el && el.matches && el.matches('[data-autosubmit]') && el.form) el.form.submit();
+    });
+    document.addEventListener('submit', (e) => {
+      const f = e.target;
+      const msg = f && f.dataset ? f.dataset.confirm : '';
+      if (msg && !window.confirm(msg)) e.preventDefault();
+    });
+    (() => { const b = document.getElementById('vcod-theme-btn');
+             if (b) b.addEventListener('click', () => window.vcodToggleTheme()); })();
+
+    // ---- 懸浮提示:接管所有 title 屬性(原生 title 延遲約 1 秒且無法排版)----
+    // 首次懸浮把 title 搬到 data-tip 以壓掉原生提示;&#10; 分行、多行時首行粗體、空行渲染為分隔線、
+    // 兩個空白開頭縮排、[ds] 路徑 / C:\ / MAC 等寬;data-tip-flat 取消首行粗體(逐條同級清單用)
+    (() => {
+      let tip = null, cur = null;
+      const isMono = (s) => /^\s*(\[[^\]]+\]\s|[A-Za-z]:\\|\/|MAC[::])/.test(s) || /\s\[[^\]]+\]\s/.test(s);
+      function box() {
+        if (!tip) { tip = document.createElement('div'); tip.id = 'vtip'; tip.setAttribute('role', 'tooltip');
+                    document.body.appendChild(tip); }
+        return tip;
+      }
+      function render(text, flat) {
+        const t = box(); t.textContent = '';
+        const lines = text.split('\n');
+        lines.forEach((ln, i) => {
+          const d = document.createElement('div');
+          if (ln.trim() === '') { if (i === 0 || i === lines.length - 1) return; d.className = 't-sep'; t.appendChild(d); return; }
+          const cls = [];
+          if (i === 0 && lines.length > 1 && !flat) cls.push('t-head');
+          else { if (isMono(ln)) cls.push('t-mono'); if (/^\s{2}/.test(ln)) cls.push('t-ind'); }
+          d.className = cls.join(' '); d.textContent = ln.trim(); t.appendChild(d);
+        });
+      }
+      function place(el, mx, my) {
+        const t = box(), r = el.getBoundingClientRect(), vw = window.innerWidth, vh = window.innerHeight;
+        const tw = t.offsetWidth, th = t.offsetHeight;
+        const x = Math.max(8, Math.min(mx - 16, vw - tw - 8));
+        let y = r.bottom + 6;
+        if (y + th > vh - 8) y = r.top - th - 6;              // 下方放不下改放上方
+        if (y < 8) y = Math.max(8, Math.min(my + 18, vh - th - 8)); // 上下皆放不下(高元素)跟隨游標
+        t.style.left = x + 'px'; t.style.top = y + 'px';
+      }
+      function hide() { cur = null; if (tip) tip.classList.remove('show'); }
+      function show(el, mx, my) {
+        if (el.hasAttribute('title')) { el.dataset.tip = el.getAttribute('title'); el.removeAttribute('title'); }
+        const text = (el.dataset.tip || '').trim();
+        if (!text) { hide(); return; }
+        cur = el; render(text, el.hasAttribute('data-tip-flat')); place(el, mx, my); box().classList.add('show');
+      }
+      document.addEventListener('mouseover', (e) => {
+        const el = e.target && e.target.closest ? e.target.closest('[title],[data-tip]') : null;
+        if (!el) { if (cur) hide(); return; }
+        if (el !== cur) show(el, e.clientX, e.clientY);
+      });
+      document.addEventListener('mouseout', (e) => { if (!e.relatedTarget && cur) hide(); });
+      document.addEventListener('focusin', (e) => {
+        const el = e.target && e.target.closest ? e.target.closest('[title],[data-tip]') : null;
+        if (el && el !== cur) { const r = el.getBoundingClientRect(); show(el, r.left + 16, r.top); }
+      });
+      document.addEventListener('focusout', () => { if (cur) hide(); });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hide(); });
+      document.addEventListener('scroll', hide, true);
+      window.vcodTipHide = hide;   // partial 換入後呼叫:原元素已不在 DOM
+    })();
+
+    // ---- 頂欄指示器:15 秒輪詢 /api/status ----
+    function vcodTimeAgo(iso) {
+      if (!iso) return '尚未更新';
+      const diff = Math.max(0, Math.floor((Date.now() - new Date(iso)) / 1000));
+      if (diff < 60) return diff + ' 秒前';
+      if (diff < 3600) return Math.floor(diff / 60) + ' 分鐘前';
+      return Math.floor(diff / 3600) + ' 小時前';
+    }
+    function vcodRenderStatus(d) {
+      const dot = document.getElementById('vc-dot'), label = document.getElementById('vc-label');
+      if (!d || !d.vc_total) { dot.className = 'dot dot-wait'; label.textContent = '尚無 vCenter'; return; }
+      dot.className = d.vc_ok === d.vc_total ? 'dot dot-ok' : (d.vc_ok ? 'dot dot-wait' : 'dot dot-bad');
+      label.textContent = 'vCenter ' + d.vc_ok + '/' + d.vc_total + ' · 更新 ' + vcodTimeAgo(d.polled_at);
+    }
+    function vcodStatus() {
+      fetch('/api/status', {headers: {'Accept': 'application/json'}})
+        .then(r => { if (r.status === 401) { location.href = '/login'; throw 0; } return r.json(); })
+        .then(vcodRenderStatus).catch(() => {});
+    }
+    vcodStatus(); setInterval(vcodStatus, 15000);
+
+    // ---- 搜尋:卡片 / 列篩選 + <mark> 標示(只操作 DOM 文字節點,不用 innerHTML) ----
+    function vcodHighlight(root, q) {
+      root.querySelectorAll('.hl').forEach(el => {
+        if (el.dataset.t === undefined) el.dataset.t = el.textContent;
+        const t = el.dataset.t;
+        const i = q ? t.toLowerCase().indexOf(q) : -1;
+        while (el.firstChild) el.removeChild(el.firstChild);
+        if (i < 0) { el.textContent = t; return; }
+        el.append(t.slice(0, i));
+        const m = document.createElement('mark'); m.textContent = t.slice(i, i + q.length);
+        el.append(m, t.slice(i + q.length));
+      });
+    }
+    function vcodFilterCards(panel, q) {
+      q = (q || '').trim().toLowerCase();
+      let shown = 0, total = 0;
+      panel.querySelectorAll('.vcard').forEach(card => {
+        total++;
+        const rows = card.querySelectorAll('.vm-row');
+        const titleHit = !q || (card.dataset.title || '').includes(q);
+        let any = titleHit;
+        rows.forEach(r => {
+          const hit = titleHit || (r.dataset.search || '').includes(q);
+          r.classList.toggle('hidden', !hit);
+          if (hit) any = true;
+        });
+        const cardHit = any || (!q) || (card.dataset.search || '').includes(q);
+        card.classList.toggle('hidden', !cardHit);
+        if (cardHit) shown++;
+      });
+      vcodHighlight(panel, q);
+      vcodSyncGroups(panel, !!q);
+      const c = document.getElementById('count');
+      if (c) c.textContent = q ? ('顯示 ' + shown + ' / ' + total) : (total + ' 項');
+    }
+    // 依 vCenter 分組的區段:更新「顯示 x / y」、搜尋時隱藏整段被篩空的 vCenter
+    function vcodSyncGroups(panel, searching) {
+      panel.querySelectorAll('.vc-group').forEach(g => {
+        const cards = g.querySelectorAll('.vcard');
+        const visible = Array.from(cards).filter(c => !c.classList.contains('hidden')).length;
+        const cnt = g.querySelector('.vc-count');
+        if (cnt) {
+          const total = parseInt(cnt.dataset.total || cards.length, 10);
+          const unit = (cnt.dataset.unit || (cnt.dataset.unit = cnt.textContent.replace(/^[\d\s\/]+/, '')));
+          cnt.textContent = (visible === total ? total : visible + ' / ' + total) + ' ' + unit;
+        }
+        g.classList.toggle('hidden', searching && cards.length > 0 && visible === 0);
+      });
+    }
+    // 區段收合(點標頭切換;狀態以 vCenter id 記在 localStorage,partial 更新後重套)
+    function vcodBindGroups(panel) {
+      panel.querySelectorAll('.vc-group').forEach(g => {
+        const key = 'vcod-vc-collapsed-' + g.dataset.vc;
+        try { if (localStorage.getItem(key) === '1') g.classList.add('collapsed'); } catch (e) {}
+        const head = g.querySelector('.vc-head');
+        const toggle = () => {
+          g.classList.toggle('collapsed');
+          try { localStorage.setItem(key, g.classList.contains('collapsed') ? '1' : '0'); } catch (e) {}
+        };
+        head.addEventListener('click', toggle);
+        head.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+      });
+    }
+
+    // ---- 深連結定位:?focus=<物件 key>(vc_id::moid)只顯示該卡片 / 列;使用者一輸入搜尋即取消 ----
+    window.VCOD_FOCUS = (() => { try { return new URLSearchParams(location.search).get('focus') || ''; } catch (e) { return ''; } })();
+    function vcodClearFocus() {
+      if (!window.VCOD_FOCUS) return;
+      window.VCOD_FOCUS = '';
+      try { history.replaceState(null, '', location.pathname); } catch (e) {}
+    }
+    // 回傳 true = 已套用定位(呼叫端不必再做一般篩選)
+    function vcodFocus(panel) {
+      const f = window.VCOD_FOCUS;
+      if (!f) return false;
+      const targets = Array.from(panel.querySelectorAll('[data-key]')).filter(el => el.dataset.key === f);
+      if (!targets.length) return false;
+      panel.querySelectorAll('.vcard, tr[data-search], .vm-row').forEach(el => el.classList.add('hidden'));
+      targets.forEach(t => {
+        t.classList.remove('hidden');
+        const card = t.closest('.vcard');
+        if (card) {
+          card.classList.remove('hidden');
+          if (!t.classList.contains('vm-row')) card.querySelectorAll('.vm-row').forEach(r => r.classList.remove('hidden'));
+        }
+      });
+      vcodHighlight(panel, '');
+      vcodSyncGroups(panel, true);
+      const c = document.getElementById('count');
+      if (c) c.textContent = '已定位 1 項 · 輸入搜尋或清除網址即回全部';
+      return true;
+    }
+
+    // ---- 自動更新:fetch 同頁 ?partial=1&since=<快照 token>;快照沒變伺服器回 204,
+    //      不重畫也不重排;有變才換掉 #panel 並重套搜尋 ----
+    function vcodAutoRefresh(afterRender) {
+      const panel = document.getElementById('panel'), box = document.getElementById('auto');
+      const label = document.getElementById('refresh-label');
+      if (!panel) return;
+      let since = panel.dataset.snapshot || '';
+      if (box) {
+        try { box.checked = localStorage.getItem('vcod-auto') !== '0'; } catch (e) {}
+        box.addEventListener('change', () => { try { localStorage.setItem('vcod-auto', box.checked ? '1' : '0'); } catch (e) {} });
+      }
+      const now = () => new Date().toLocaleTimeString('zh-TW', {hour12: false});
+      async function tick() {
+        if (document.hidden || (box && !box.checked)) return;
+        try {
+          const r = await fetch(location.pathname + '?partial=1&since=' + encodeURIComponent(since),
+                                {headers: {'Accept': 'text/html'}});
+          if (r.status === 401 || r.redirected) { location.reload(); return; }
+          if (r.status === 204) { if (label) label.textContent = '無變化 ' + now(); return; }
+          if (!r.ok) return;
+          since = r.headers.get('X-Snapshot') || since;
+          panel.innerHTML = await r.text();   // 內容為本站 Jinja 自動轉義輸出
+          window.vcodTipHide();
+          if (afterRender) afterRender();
+          if (label) label.textContent = '已更新 ' + now();
+        } catch (e) { /* 網路瞬斷:下一輪再試 */ }
+      }
+      // 檢查頻率取輪詢間隔的一半(最短 10 秒):沒新資料的請求只是一個 204,成本極低,
+      // 換來新快照最晚半個間隔內就上畫面
+      setInterval(tick, Math.max(10000, Math.round(window.VCOD_POLL_MS / 2)));
+    }
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

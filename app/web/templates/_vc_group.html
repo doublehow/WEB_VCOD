@@ -1,0 +1,31 @@
+{#
+  依 vCenter 分組的區段外殼(運算 / 儲存 / 網路面板共用)。
+  用法:{% call vc.section(g, unit='台主機') %} …卡片… {% endcall %}
+  - 標頭:vCenter 名稱、連線狀態 badge、卡片數、最後輪詢;點擊可收合(localStorage 記憶)
+  - 本輪失敗且無資料時顯示錯誤訊息代替卡片
+  - 前端 vcodFilterCards() 會在區段內所有卡片都被篩掉時隱藏整段
+#}
+{% macro section(g, unit) %}
+<section class="vc-group" data-vc="{{ g.vc_id }}">
+  <div class="vc-head" role="button" tabindex="0" title="點擊收合 / 展開">
+    <span class="vc-caret">▾</span>
+    <span class="vc-name">{{ g.vc }}</span>
+    {% if g.status == 'ok' and not g.stale %}<span class="badge badge-allow">已連線</span>
+    {% elif g.status == 'failed' %}<span class="badge badge-deny" title="{{ g.error }}">連線失敗</span>
+      {% if g.stale %}<span class="badge badge-warn" title="顯示上一輪資料">資料過期</span>{% endif %}
+    {% else %}<span class="badge badge-warn">等待輪詢</span>{% endif %}
+    <span class="muted vc-meta">{{ g.host }}{% if g.about %} · {{ g.about }}{% endif %}</span>
+    <span class="muted vc-count" data-total="{{ g.cards|length }}">{{ g.cards|length }} {{ unit }}</span>
+  </div>
+  <div class="vc-body">
+    {% if g.cards %}
+    <div class="grid">{{ caller() }}</div>
+    {% elif g.status == 'failed' %}
+    <div class="flash flash-err" style="margin:0;">⚠️ {{ g.error }}</div>
+    {% else %}
+    <p class="muted" style="margin:0;font-size:12.5px;">
+      {% if g.polled_at %}沒有資料。{% else %}等待首次輪詢…{% endif %}</p>
+    {% endif %}
+  </div>
+</section>
+{% endmacro %}

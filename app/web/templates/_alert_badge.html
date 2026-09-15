@@ -1,0 +1,13 @@
+{#
+  進行中警示小籤(卡片標題 / VM 列 / 表格共用)。
+  用法:{{ ab.badge(alerts) }} —— alerts 為 alerting.active_index() 的清單;空清單不輸出。
+  title 列出每條:規則 數值(持續時間由前端不算,只給首次時間)
+#}
+{% macro badge(alerts, compact=False) %}
+{% if alerts %}
+{% set crit = alerts|selectattr('level', 'equalto', 'critical')|list %}
+<span class="al-badge {{ 'al-critical' if crit else 'al-warning' }}" data-tip-flat
+      title="{% for a in alerts %}{{ '🔴' if a.level == 'critical' else '⚠️' }} {{ a.label }}:{{ a.value }}{% if a.first_at %}(自 {{ a.first_at.strftime('%m-%d %H:%M') }}){% endif %}{% if not loop.last %}&#10;{% endif %}{% endfor %}">
+  {{ '🔴' if crit else '⚠️' }}{% if not compact %} {{ alerts|length }}{% endif %}</span>
+{% endif %}
+{% endmacro %}

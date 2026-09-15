@@ -1,0 +1,230 @@
+{% extends "base.html" %}
+{% block title %}儀表板 — VCOD{% endblock %}
+{% block page_title %}儀表板{% endblock %}
+{% block head %}
+<style>
+  .res-row { display:grid; grid-template-columns:70px 1fr 120px; align-items:center; gap:10px;
+             font-size:12.5px; margin-bottom:10px; }
+  .res-row .n { text-align:right; font-variant-numeric:tabular-nums; color:var(--text2); }
+  .alert-scroll { max-height:320px; overflow-y:auto; }
+  .alert-scroll thead th { position:sticky; top:0; background:var(--bg2); z-index:2; }
+  /* 需關注表:固定欄寬,名稱 / vCenter 過長截斷,用量欄吃剩餘寬度讓長條有空間 */
+  .alert-table { table-layout:fixed; min-width:720px; }
+  .alert-table td { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .alert-table .usage { display:flex; align-items:center; gap:10px; }
+  .alert-table .usage .pbar { flex:1; }
+  .alert-table .usage .pct { width:52px; text-align:right; font-size:12px; flex-shrink:0; }
+</style>
+{% endblock %}
+{% block content %}
+
+<div class="card" style="margin-bottom:20px;">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+    <div><h3>進行中警示</h3>
+      <p class="sub" style="margin:0;">警示引擎(已去抖 / 排除 / 抑制)目前 firing 的項目;規則與歷史見 <a class="link" href="/alerts">警示</a> 頁</p></div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      {% if n_crit %}<span class="badge badge-deny">🔴 {{ n_crit }} 嚴重</span>{% endif %}
+      {% if n_warn %}<span class="badge badge-warn">⚠️ {{ n_warn }} 警告</span>{% endif %}
+      {% if suppression and (suppression.frozen_vcs or suppression.hosts_suppressed_vms) %}
+      <span class="muted" style="font-size:12px;" title="被抑制的物件不評估,不代表沒事">
+        ⏸{% if suppression.frozen_vcs %} {{ suppression.frozen_vcs|length }} 座凍結{% endif %}{% if suppression.hosts_suppressed_vms %} {{ suppression.hosts_suppressed_vms }} 台 VM 暫停{% endif %}</span>{% endif %}
+    </div>
+  </div>
+  {% if alerts_active %}
+  <div class="alert-scroll" style="margin-top:12px;">
+  <table class="alert-table">
+    <colgroup>
+      <col style="width:70px;"><col style="width:70px;"><col style="width:26%;"><col style="width:80px;"><col style="width:14%;">
+      <col style="width:170px;"><col><col style="width:110px;">
+    </colgroup>
+    <thead><tr>
+      <th>等級</th><th>類型</th><th>物件</th><th>狀態</th><th>vCenter</th><th>規則</th><th>數值</th><th>持續</th>
+    </tr></thead>
+    <tbody>
+      {% for a in alerts_active %}
+      <tr class="{{ 'attention' if a.level == 'critical' else 'attention-warning' }}">
+        <td><span class="badge {{ 'badge-deny' if a.level == 'critical' else 'badge-warn' }}">{{ '嚴重' if a.level == 'critical' else '警告' }}</span></td>
+        <td><span class="badge badge-muted">{{ '客體' if a.layer == 'guest' else '平台' }}</span></td>
+        <td title="{{ a.target_name }}"><a class="link" href="{{ alert_href(a.rule, a.target_type, a.obj_key) }}">{{ a.target_name }}</a></td>
+        <td>{% set os = obj_status.get(a.obj_key) %}{% if os %}<span class="badge badge-{{ os.css }}">{{ os.label }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="muted" title="{{ a.vc_name }}">{{ a.vc_name }}</td>
+        <td title="{{ a.label }}">{{ a.label }}</td>
+        <td class="mono" style="font-size:12.5px;" title="{{ a.value }}">{{ a.value }}</td>
+        <td class="muted tnum">{% if a.first_at %}{% set d = (now - a.first_at).total_seconds()|int %}
+          {% if d < 60 %}{{ d }} 秒{% elif d < 3600 %}{{ d // 60 }} 分{% elif d < 86400 %}{{ d // 3600 }} 時 {{ (d % 3600) // 60 }} 分{% else %}{{ d // 86400 }} 天{% endif %}{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% if active_total > alerts_active|length %}<p class="muted" style="font-size:12px;margin:8px 0 0;">另有 {{ active_total - alerts_active|length }} 筆,見警示頁。</p>{% endif %}
+  {% else %}<p class="muted" style="margin:12px 0 0;">目前沒有進行中的警示 🎉</p>{% endif %}
+  {% if s.vc_alarms %}
+  <p class="muted" style="font-size:12.5px;margin:14px 0 0;">
+    vCenter 內建告警:<span class="badge badge-deny">{{ s.vc_alarms|selectattr('status', 'equalto', 'red')|list|length }} 紅</span>
+    <span class="badge badge-warn">{{ s.vc_alarms|rejectattr('status', 'equalto', 'red')|list|length }} 黃</span>
+    · 詳見 <a class="link" href="/alerts">警示頁</a></p>
+  {% endif %}
+</div>
+
+<div class="card" style="margin-bottom:20px;">
+  <h3>vCenter 連線狀態</h3>
+  <p class="sub">每座 vCenter 最近一輪輪詢結果;失敗時沿用上一輪資料(標示「資料過期」)</p>
+  {% if s.per_vc %}
+  <table>
+    <thead><tr>
+      <th>名稱</th><th>主機</th><th>版本</th>
+      <th style="width:80px;">ESXi</th><th style="width:110px;">VM(開機)</th><th style="width:80px;">儲存區</th>
+      <th style="width:110px;">最後輪詢</th><th style="width:80px;">耗時</th><th style="width:110px;">狀態</th>
+    </tr></thead>
+    <tbody>
+      {% for v in s.per_vc %}
+      <tr class="{{ 'attention' if v.enabled and v.status == 'failed' else '' }}">
+        <td><a class="link" href="/vcenters">{{ v.name }}</a></td>
+        <td class="mono">{{ v.host }}</td>
+        <td class="muted" style="font-size:12.5px;">{{ v.about or '—' }}</td>
+        <td class="tnum">{{ v.hosts }}</td>
+        <td class="tnum">{{ v.vms }}<span class="muted">（{{ v.vms_on }}）</span></td>
+        <td class="tnum">{{ v.datastores }}</td>
+        <td class="muted">{{ v.polled_at.strftime('%m-%d %H:%M:%S') if v.polled_at else '—' }}</td>
+        <td class="muted tnum">{{ v.duration_ms ~ ' ms' if v.polled_at else '—' }}</td>
+        <td>
+          {% if not v.enabled %}<span class="badge badge-muted">停用</span>
+          {% elif v.status == 'ok' %}<span class="badge badge-allow">已連線</span>
+          {% elif v.status == 'failed' %}<span class="badge badge-deny" title="{{ v.error }}">失敗</span>
+            {% if v.stale %}<span class="badge badge-warn">資料過期</span>{% endif %}
+          {% else %}<span class="badge badge-warn">等待輪詢</span>{% endif %}
+        </td>
+      </tr>
+      {% if v.enabled and v.status == 'failed' and v.error %}
+      <tr><td colspan="9" class="muted" style="font-size:12px;padding-top:0;">↳ {{ v.error }}</td></tr>
+      {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">尚無 vCenter — 請至 <a class="link" href="/vcenters">vCenter 管理</a> 新增連線。</p>
+  {% endif %}
+</div>
+
+<div class="stat-grid">
+  <div class="card">
+    <div class="stat-label muted">vCenter 已連線</div>
+    <div class="stat-value" style="{{ 'color:var(--deny);' if s.vc_total and s.vc_ok < s.vc_total else '' }}">
+      {{ s.vc_ok }}<small> / {{ s.vc_total }}</small></div>
+  </div>
+  <div class="card">
+    <div class="stat-label muted">ESXi 主機</div>
+    <div class="stat-value">{{ s.host_connected }}<small> / {{ s.host_total }} 已連線</small></div>
+  </div>
+  <div class="card">
+    <div class="stat-label muted">虛擬機(開機 / 全部)</div>
+    <div class="stat-value">{{ s.vm_on }}<small> / {{ s.vm_total }}</small></div>
+  </div>
+  <div class="card">
+    <div class="stat-label muted">儲存區</div>
+    <div class="stat-value">{{ s.ds_total }}</div>
+  </div>
+  <div class="card">
+    <div class="stat-label muted">進行中警示(嚴重 / 警告)</div>
+    <div class="stat-value" style="{{ 'color:var(--deny);' if n_crit else ('color:var(--orange);' if n_warn else '') }}">
+      {{ n_crit }}<small> / {{ n_warn }}</small></div>
+  </div>
+</div>
+
+<div class="chart-grid">
+  <div class="card">
+    <h3>整體資源使用率</h3>
+    <p class="sub">所有已連線 vCenter 的主機 / 儲存區加總</p>
+    <div class="res-row">
+      <span>CPU</span>
+      <div class="pbar {{ s.cpu_pct|usage_tier }}"><div style="width:{{ s.cpu_pct }}%;"></div></div>
+      <span class="n"><b class="tier-{{ s.cpu_pct|usage_tier }}">{{ s.cpu_pct }}%</b><br>
+        <span class="muted" style="font-size:11px;">{{ s.cpu_used_ghz }} / {{ s.cpu_total_ghz }} GHz</span></span>
+    </div>
+    <div class="res-row">
+      <span>記憶體</span>
+      <div class="pbar {{ s.mem_pct|usage_tier }}"><div style="width:{{ s.mem_pct }}%;"></div></div>
+      <span class="n"><b class="tier-{{ s.mem_pct|usage_tier }}">{{ s.mem_pct }}%</b><br>
+        <span class="muted" style="font-size:11px;">{{ s.mem_used_gb|gb }} / {{ s.mem_total_gb|gb }} GB</span></span>
+    </div>
+    <div class="res-row">
+      <span>儲存區</span>
+      <div class="pbar {{ s.ds_pct|usage_tier }}"><div style="width:{{ s.ds_pct }}%;"></div></div>
+      <span class="n"><b class="tier-{{ s.ds_pct|usage_tier }}">{{ s.ds_pct }}%</b><br>
+        <span class="muted" style="font-size:11px;">{{ s.ds_used_gb|gb }} / {{ s.ds_cap_gb|gb }} GB</span></span>
+    </div>
+    {% if s.polled_at %}
+    <p class="muted" style="font-size:11.5px;margin:8px 0 0;">最後輪詢 {{ s.polled_at.strftime('%m-%d %H:%M:%S') }}
+      · 耗時 {{ s.round_ms }} ms · 每 {{ poll_interval }} 秒更新</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h3>VM 電源狀態</h3>
+    <p class="sub">{% if s.vm_templates %}含 {{ s.vm_templates }} 個範本{% else %}全部 VM{% endif %}</p>
+    {% if donut_power %}
+    <div class="donut-wrap">
+      <div class="donut" style="--_g:{{ donut_power.gradient }};">
+        <div class="donut-mid"><b>{{ s.vm_total }}</b><span>VM</span></div>
+      </div>
+      <div class="legend">
+        {% for p in donut_power.legend %}
+        <div class="row"><span class="sw" style="background:var({{ p.var }});"></span>
+          {{ p.label }}<span class="n">{{ p.count }}（{{ p.pct }}%）</span></div>
+        {% endfor %}
+      </div>
+    </div>
+    {% else %}<p class="muted">尚無 VM 資料 — 請至「vCenter 管理」新增連線。</p>{% endif %}
+  </div>
+
+  <div class="card">
+    <h3>主機 CPU 用量 Top</h3>
+    <p class="sub">依 CPU 使用率排序</p>
+    {% if s.top_cpu %}
+    <div class="bars">
+      {% for h in s.top_cpu %}
+      <div class="bar-row">
+        <span class="lbl" title="{{ h.name }}（{{ h.vc }}）">{{ h.name }}</span>
+        <div class="pbar {{ h.cpu_pct|usage_tier }}"><div style="width:{{ h.cpu_pct }}%;"></div></div>
+        <span class="n tier-{{ h.cpu_pct|usage_tier }}">{{ h.cpu_pct }}%</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}<p class="muted">尚無主機資料。</p>{% endif %}
+  </div>
+
+  <div class="card">
+    <h3>主機記憶體用量 Top</h3>
+    <p class="sub">依記憶體使用率排序</p>
+    {% if s.top_mem %}
+    <div class="bars">
+      {% for h in s.top_mem %}
+      <div class="bar-row">
+        <span class="lbl" title="{{ h.name }}（{{ h.vc }}）">{{ h.name }}</span>
+        <div class="pbar {{ h.mem_pct|usage_tier }}"><div style="width:{{ h.mem_pct }}%;"></div></div>
+        <span class="n tier-{{ h.mem_pct|usage_tier }}">{{ h.mem_pct }}%</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}<p class="muted">尚無主機資料。</p>{% endif %}
+  </div>
+
+  <div class="card">
+    <h3>儲存區容量用量 Top</h3>
+    <p class="sub">依已用比例排序</p>
+    {% if s.top_ds %}
+    <div class="bars">
+      {% for d in s.top_ds %}
+      <div class="bar-row">
+        <span class="lbl" title="{{ d.name }}（{{ d.vc }}）{{ d.used_gb|gb }} / {{ d.capacity_gb|gb }} GB">{{ d.name }}</span>
+        <div class="pbar {{ d.used_pct|usage_tier }}"><div style="width:{{ d.used_pct }}%;"></div></div>
+        <span class="n tier-{{ d.used_pct|usage_tier }}">{{ d.used_pct }}%</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}<p class="muted">尚無儲存區資料。</p>{% endif %}
+  </div>
+</div>
+
+{% endblock %}

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VCOD — 登入</title>
+  <script nonce="{{ csp_nonce }}">
+    (function () {
+      var t = localStorage.getItem('vcod-theme');
+      if (t !== 'dark' && t !== 'light') {
+        t = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      document.documentElement.dataset.theme = t;
+    })();
+  </script>
+  <style>
+    :root {
+      color-scheme:light;
+      --bg:#f2f4f9; --bg2:#e8ebf4; --bg3:#dce1ee; --border:#c4cadb;
+      --text:#1a2035; --text2:#4a5572; --text3:#8a95aa;
+      --accent:#2d6ee0; --accent2:#1f56c4; --deny:#dc2626; --radius:8px;
+    }
+    html[data-theme="dark"] {
+      color-scheme:dark;
+      --bg:#111627; --bg2:#1a2035; --bg3:#242c49; --border:#333d63;
+      --text:#e7ebf7; --text2:#b3bcd6; --text3:#7d89ab;
+      --accent:#5b8def; --accent2:#7ba4f5; --deny:#f87171;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+           padding:16px; font-family:'Segoe UI', system-ui, sans-serif; background:var(--bg); color:var(--text); }
+    .card { background:var(--bg2); border:1px solid var(--border); border-radius:12px;
+            padding:32px; width:100%; max-width:360px; box-shadow:0 20px 60px rgba(0,0,0,.10); }
+    .logo { display:flex; align-items:center; justify-content:center; gap:9px;
+            font-size:20px; font-weight:600; margin-bottom:4px; }
+    .logo svg { color:var(--accent); }
+    .sub { color:var(--text3); font-size:12px; text-align:center; margin-bottom:22px; }
+    label { display:block; font-size:11px; color:var(--text3); text-transform:uppercase;
+            letter-spacing:.06em; margin:12px 0 4px; }
+    input { width:100%; background:var(--bg3); border:1px solid var(--border); color:var(--text);
+            padding:9px 11px; border-radius:var(--radius); font-size:14px; outline:none; }
+    input:focus { border-color:var(--accent); }
+    button { width:100%; margin-top:20px; background:var(--accent); border:1px solid var(--accent2);
+             color:#fff; padding:10px; border-radius:var(--radius); font-size:14px; cursor:pointer; }
+    button:hover { background:var(--accent2); }
+    .err { background:rgba(220,38,38,.08); border:1px solid rgba(220,38,38,.2); color:var(--deny);
+           font-size:13px; padding:8px 10px; border-radius:var(--radius); margin-bottom:14px; }
+    .hint { color:var(--text3); font-size:11px; text-align:center; margin-top:16px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="3" width="20" height="14" rx="2"/>
+        <path d="M8 21h8M12 17v4M6 8h4M6 12h8"/>
+      </svg>
+      VCOD
+    </div>
+    <div class="sub">vCenter Overview Dashboard —
+      {% if ad_enabled %}請使用 AD 帳號登入{% else %}請登入{% endif %}</div>
+    {% if error %}<div class="err">{{ error }}</div>{% endif %}
+    <form method="post" action="/login">
+      <label>帳號</label>
+      <input name="username" autocomplete="username" autofocus required maxlength="100">
+      <label>密碼</label>
+      <input name="password" type="password" autocomplete="current-password" required maxlength="200">
+      <button type="submit">登入</button>
+    </form>
+    {% if not ad_enabled %}<div class="hint">尚未啟用 AD — 請以本機管理員 admin 登入後至設定頁啟用</div>{% endif %}
+  </div>
+</body>
+</html>

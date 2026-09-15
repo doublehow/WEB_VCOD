@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}網路 — VCOD{% endblock %}
+{% block page_title %}網路(Port Group){% endblock %}
+{% block content %}
+<div class="filter-bar">
+  <input type="search" id="q" placeholder="搜尋網路群組 / VM / IP…" style="width:280px;" autocomplete="off">
+  <span class="count" id="count"></span>
+  <label class="muted" style="font-size:12.5px;display:flex;align-items:center;gap:6px;margin-left:8px;">
+    <input type="checkbox" id="hide-empty" style="width:auto;">隱藏無 VM 的群組</label>
+  <span class="spacer"></span>
+  <label class="muted" style="font-size:12.5px;display:flex;align-items:center;gap:6px;">
+    <input type="checkbox" id="auto" checked style="width:auto;">自動更新</label>
+  <span class="muted" id="refresh-label" style="font-size:12px;"></span>
+</div>
+<div id="panel" data-snapshot="{{ snapshot }}">{% include "_panel_network.html" %}</div>
+{% endblock %}
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+  const q = document.getElementById('q'), panel = document.getElementById('panel');
+  const hideEmpty = document.getElementById('hide-empty');
+  try { hideEmpty.checked = localStorage.getItem('vcod-net-hide-empty') === '1'; } catch (e) {}
+  const apply = () => {
+    if (vcodFocus(panel)) return;
+    vcodFilterCards(panel, q.value);
+    if (hideEmpty.checked) {
+      panel.querySelectorAll('.vcard[data-empty="1"]').forEach(c => c.classList.add('hidden'));
+      vcodSyncGroups(panel, !!q.value.trim());
+    }
+  };
+  q.addEventListener('input', () => { vcodClearFocus(); apply(); });
+  hideEmpty.addEventListener('change', () => {
+    try { localStorage.setItem('vcod-net-hide-empty', hideEmpty.checked ? '1' : '0'); } catch (e) {}
+    apply();
+  });
+  vcodBindGroups(panel); apply();
+  vcodAutoRefresh(() => { vcodBindGroups(panel); apply(); });
+</script>
+{% endblock %}

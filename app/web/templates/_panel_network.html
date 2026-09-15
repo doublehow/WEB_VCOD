@@ -1,0 +1,38 @@
+{% import "_vc_group.html" as vc %}
+{% if groups %}
+{% for g in groups %}
+{% call vc.section(g, '個網路群組') %}
+  {% for c in g.cards %}
+  <div class="vcard" data-search="{{ c.search }}" data-title="{{ (c.name ~ ' ' ~ c.vc)|lower }}"
+       data-empty="{{ '1' if not c.members else '0' }}">
+    <div class="vcard-head head-network">
+      <div class="vcard-title"><span class="hl" title="{{ c.name }}">{{ c.name }}</span></div>
+      <div class="vcard-sub">Network Group</div>
+    </div>
+    <div class="vcard-list-head">
+      <span style="display:flex;gap:12px;align-items:center;font-weight:500;">
+        <span style="display:flex;gap:5px;align-items:center;"><span class="dot dot-ok"></span>開機 {{ c.on_count }}</span>
+        <span style="display:flex;gap:5px;align-items:center;"><span class="dot dot-off"></span>關機 {{ c.off_count }}</span>
+      </span>
+      <span class="badge badge-muted">{{ c.members|length }} 台</span>
+    </div>
+    {% if c.members %}
+    <div class="vm-list">
+      {% for m in c.members %}{% set v = m.vm %}{% set nic = m.nic %}
+      <div class="vm-row {{ '' if v.is_on else 'off' }}" data-search="{{ (v.name ~ ' ' ~ (m.ip or '') ~ ' ' ~ (nic.mac if nic else ''))|lower }}"
+           title="{{ v.name }}{% if nic %}&#10;{{ nic.label or '網路介面卡' }} · {{ nic.adapter_type }}&#10;MAC:{{ nic.mac or '—' }}&#10;DirectPath I/O:{{ '作用中' if nic.passthrough else '非作用中' }} · {{ '已連接' if nic.connected else '未連接' }}{% if nic.ips|length > 1 %}&#10;IP:{{ nic.ips|join(', ') }}{% endif %}{% endif %}">
+        <span class="dot {{ 'dot-ok' if v.is_on else 'dot-off' }}"></span>
+        <span class="vm-name hl">{{ v.name }}</span>
+        {% if nic and nic.passthrough %}<span class="badge badge-manual" style="font-size:10.5px;">SR-IOV</span>{% endif %}
+        <span class="vm-val mono hl">{{ m.ip or '—' }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}<div class="empty">目前沒有 VM 連接此網路</div>{% endif %}
+  </div>
+  {% endfor %}
+{% endcall %}
+{% endfor %}
+{% else %}
+<div class="card"><p class="muted" style="margin:0;">尚無啟用的 vCenter — 請至「vCenter 管理」新增連線。</p></div>
+{% endif %}

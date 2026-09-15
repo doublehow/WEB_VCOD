@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}vCenter 管理 — VCOD{% endblock %}
+{% block page_title %}vCenter 管理{% endblock %}
+{% block content %}
+
+{% if error %}<div class="flash flash-err">⚠️ {{ error }}</div>{% endif %}
+{% if saved == 'poll' %}<div class="flash flash-ok">🔄 已觸發立即更新,約數秒後各頁面資料刷新。</div>
+{% elif saved %}<div class="flash flash-ok">✅ 已儲存;輪詢器將立即以新設定重新連線。</div>{% endif %}
+
+{% if can_write %}
+<div class="card" style="margin-bottom:20px;">
+  <h3>新增 vCenter</h3>
+  <p class="sub">帳號需具備 vCenter <b>唯讀(Read-only)</b>以上角色;本系統只讀取庫存與效能摘要,不做任何變更。
+    密碼以 AES-256-GCM 加密落地(金鑰 data/secret.key)。</p>
+  <form method="post" action="/vcenters" class="form-grid" id="vc-form">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <label>顯示名稱(唯一)<input name="name" id="f-name" required maxlength="100" placeholder="例:vcenter-prod"></label>
+    <label>主機(IP / FQDN)<input name="host" id="f-host" required maxlength="255" placeholder="例:vcenter.example.com"></label>
+    <label>連接埠<input name="port" id="f-port" type="number" min="1" max="65535" value="443"></label>
+    <label>帳號<input name="username" id="f-user" required maxlength="200" autocomplete="off"
+                 placeholder="例:readonly@vsphere.local"></label>
+    <label>密碼<input name="password" id="f-pass" type="password" required autocomplete="new-password"></label>
+    <label>備註<input name="note" maxlength="300" placeholder="用途 / 站點(選填)"></label>
+    <label class="row span2">
+      <input type="checkbox" name="verify_ssl" id="f-ssl" value="1" checked>
+      驗證 TLS 憑證(vCenter 需具有效憑證;自簽憑證請取消勾選)</label>
+    <div class="span2" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <button class="btn-primary" type="submit">新增</button>
+      <button type="button" id="btn-test">連線測試</button>
+      <span id="test-result" class="muted" style="font-size:12.5px;"></span>
+    </div>
+  </form>
+</div>
+{% endif %}
+
+<div class="card">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
+    <h3 style="margin:0;">已設定的 vCenter({{ vcs|length }})</h3>
+    {% if can_write and vcs %}
+    <form method="post" action="/vcenters/poll" style="display:inline;">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <button type="submit" class="btn-sm" title="不等待輪詢間隔,立刻重新抓取所有 vCenter">🔄 立即更新</button>
+    </form>{% endif %}
+  </div>
+  {% if vcs %}
+  <table>
+    <thead><tr>
+      <th>名稱</th><th>主機</th><th>帳號</th><th style="width:70px;">TLS</th>
+      <th style="width:80px;">ESXi</th><th style="width:70px;">VM</th>
+      <th style="width:130px;">最後輪詢</th><th style="width:110px;">狀態</th><th style="width:150px;"></th>
+    </tr></thead>
+    <tbody>
+      {% for vc in vcs %}
+      <tr class="{{ 'attention' if vc.enabled and vc.last_status == 'failed' else '' }}">
+        <td><b>{{ vc.name }}</b>
+          {% if vc.version %}<div class="muted" style="font-size:11.5px;">{{ vc.version }}</div>{% endif %}
+          {% if vc.note %}<div class="muted" style="font-size:12px;">{{ vc.note }}</div>{% endif %}</td>
+        <td class="mono">{{ vc.host }}{% if vc.port != 443 %}:{{ vc.port }}{% endif %}</td>
+        <td class="mono" style="font-size:12px;">{{ vc.username }}</td>
+        <td>{% if vc.verify_ssl %}<span class="badge badge-allow">驗證</span>{% else %}<span class="badge badge-muted">略過</span>{% endif %}</td>
+        <td class="tnum">{{ counts[vc.id].hosts }}</td>
+        <td class="tnum">{{ counts[vc.id].vms }}</td>
+        <td class="muted">{{ vc.last_polled_at.strftime('%m-%d %H:%M:%S') if vc.last_polled_at else '—' }}
+          {% if vc.last_polled_at %}<div style="font-size:11px;">{{ vc.last_duration_ms }} ms</div>{% endif %}</td>
+        <td><span class="badge badge-{{ vc.status_css }}">{{ vc.status_label }}</span>
+          {% if counts[vc.id].stale %}<span class="badge badge-warn">資料過期</span>{% endif %}</td>
+        <td class="nowrap">
+          {% if can_write %}
+          <a class="btn btn-sm" href="/vcenters/{{ vc.id }}/edit">編輯</a>
+          <form method="post" action="/vcenters/{{ vc.id }}/delete" style="display:inline;"
+                data-confirm="確定刪除「{{ vc.name }}」?">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            <button type="submit" class="btn-sm">刪除</button></form>
+          {% else %}<span class="muted">唯讀</span>{% endif %}
+        </td>
+      </tr>
+      {% if vc.enabled and vc.last_status == 'failed' and vc.last_error %}
+      <tr><td colspan="9" class="muted" style="font-size:12px;padding-top:0;">↳ {{ vc.last_error }}</td></tr>
+      {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="margin:0;">尚無 vCenter。{% if can_write %}請以上方表單新增。{% else %}請聯絡管理者新增。{% endif %}</p>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+{% if can_write %}
+<script nonce="{{ csp_nonce }}">
+  document.getElementById('btn-test').addEventListener('click', () => {
+    const out = document.getElementById('test-result');
+    out.textContent = '測試中…'; out.style.color = '';
+    fetch('/vcenters/test', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-Token': window.VCOD_CSRF},
+      body: JSON.stringify({
+        host: document.getElementById('f-host').value,
+        port: document.getElementById('f-port').value,
+        username: document.getElementById('f-user').value,
+        password: document.getElementById('f-pass').value,
+        verify_ssl: document.getElementById('f-ssl').checked,
+      }),
+    }).then(r => r.json()).then(d => {
+      out.textContent = (d.ok ? '✅ ' : '❌ ') + (d.message || d.error || '');
+      out.style.color = d.ok ? 'var(--allow)' : 'var(--deny)';
+    }).catch(e => { out.textContent = '測試失敗:' + e; out.style.color = 'var(--deny)'; });
+  });
+</script>
+{% endif %}
+{% endblock %}

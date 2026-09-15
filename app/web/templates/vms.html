@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}VM 總覽 — VCOD{% endblock %}
+{% block page_title %}VM 總覽{% endblock %}
+{% block head %}
+<style>
+  /* 固定欄寬(table-layout:fixed + th 寬度):切換每頁筆數 / 分頁 / 排序時欄位不再跳動;
+     文字過長一律截斷 + title 顯示全文,窄螢幕由 .card 橫向捲動而非擠壓欄位 */
+  .vm-table { table-layout:fixed; min-width:1180px; }
+  .vm-table th, .vm-table td { overflow:hidden; }
+  .vm-table td.name .hl { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .vm-table td .ml div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.6; }
+  .vm-table td .sub { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .vm-table td.ell { white-space:nowrap; text-overflow:ellipsis; }
+  .vm-table td.wrap { white-space:normal; word-break:break-word; }
+  @media (max-width: 1400px) { .hide-narrow { display:none; } }
+</style>
+{% endblock %}
+{% block content %}
+<div class="filter-bar">
+  <input type="search" id="q" placeholder="搜尋 VM / IP / 主機 / 網路 / 儲存區…" style="width:300px;" autocomplete="off">
+  <span class="count" id="count"></span>
+  <span class="spacer"></span>
+  <select id="psize" title="每頁筆數">
+    <option value="25">25 筆/頁</option><option value="100">100 筆/頁</option><option value="0">全部</option>
+  </select>
+  <button type="button" class="btn-sm" id="prev">‹</button>
+  <span class="muted" id="pinfo" style="font-size:12.5px;min-width:70px;text-align:center;"></span>
+  <button type="button" class="btn-sm" id="next">›</button>
+  <a class="btn btn-primary btn-sm" href="/vms/export.csv" style="font-weight:600;padding:5px 14px;"
+     title="匯出目前全部 VM(UTF-8 BOM,Excel 可直接開啟)">⬇ 匯出 CSV</a>
+  <label class="muted" style="font-size:12.5px;display:flex;align-items:center;gap:6px;">
+    <input type="checkbox" id="auto" checked style="width:auto;">自動更新</label>
+  <span class="muted" id="refresh-label" style="font-size:12px;"></span>
+</div>
+<div class="card" id="panel" data-snapshot="{{ snapshot }}">{% include "_panel_vms.html" %}</div>
+{% endblock %}
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+  // 客端篩選 / 排序 / 分頁:資料量在千筆以內,全部列由伺服器渲染,前端只切換可見性
+  const q = document.getElementById('q'), panel = document.getElementById('panel');
+  const psize = document.getElementById('psize'), pinfo = document.getElementById('pinfo');
+  let page = 0, sortKey = 'name', sortDir = 1;
+  try { psize.value = localStorage.getItem('vcod-vms-psize') || '25'; } catch (e) {}
+
+  function rows() { return Array.from(panel.querySelectorAll('tbody tr[data-search]')); }
+  function apply() {
+    const s = (q.value || '').trim().toLowerCase();
+    const all = rows();
+    const hit = window.VCOD_FOCUS ? all.filter(r => r.dataset.key === window.VCOD_FOCUS)
+                                  : all.filter(r => !s || r.dataset.search.includes(s));
+    all.forEach(r => r.classList.add('hidden'));
+    // 排序:依 th[data-sort] 對應 td 的 data-v(數值)或文字
+    const idx = Array.from(panel.querySelectorAll('thead th')).findIndex(th => th.dataset.sort === sortKey);
+    if (idx >= 0) {
+      const numeric = panel.querySelectorAll('thead th')[idx].dataset.type === 'num';
+      hit.sort((a, b) => {
+        const ca = a.children[idx], cb = b.children[idx];
+        const va = numeric ? parseFloat(ca.dataset.v || '0') : (ca.dataset.v || ca.textContent).trim().toLowerCase();
+        const vb = numeric ? parseFloat(cb.dataset.v || '0') : (cb.dataset.v || cb.textContent).trim().toLowerCase();
+        return (va < vb ? -1 : va > vb ? 1 : 0) * sortDir;
+      });
+      const tbody = panel.querySelector('tbody');
+      hit.forEach(r => tbody.appendChild(r));
+    }
+    const size = parseInt(psize.value, 10) || 0;
+    const pages = size ? Math.max(1, Math.ceil(hit.length / size)) : 1;
+    page = Math.min(page, pages - 1);
+    const start = size ? page * size : 0, end = size ? start + size : hit.length;
+    hit.forEach((r, i) => { if (i >= start && i < end) r.classList.remove('hidden'); });
+    vcodHighlight(panel, s);
+    document.getElementById('count').textContent = window.VCOD_FOCUS ? ('已定位 ' + hit.length + ' 項 · 輸入搜尋即回全部')
+      : (s ? ('符合 ' + hit.length + ' / ' + all.length) : (all.length + ' 台 VM'));
+    pinfo.textContent = (page + 1) + ' / ' + pages;
+    panel.querySelectorAll('thead th.sortable').forEach(th => {
+      th.classList.toggle('asc', th.dataset.sort === sortKey && sortDir === 1);
+      th.classList.toggle('desc', th.dataset.sort === sortKey && sortDir === -1);
+    });
+  }
+  function bindHeaders() {
+    panel.querySelectorAll('thead th.sortable').forEach(th => th.addEventListener('click', () => {
+      if (sortKey === th.dataset.sort) sortDir = -sortDir; else { sortKey = th.dataset.sort; sortDir = 1; }
+      apply();
+    }));
+  }
+  q.addEventListener('input', () => { vcodClearFocus(); page = 0; apply(); });
+  psize.addEventListener('change', () => { page = 0; try { localStorage.setItem('vcod-vms-psize', psize.value); } catch (e) {} apply(); });
+  document.getElementById('prev').addEventListener('click', () => { page = Math.max(0, page - 1); apply(); });
+  document.getElementById('next').addEventListener('click', () => { page++; apply(); });
+  bindHeaders(); apply();
+  vcodAutoRefresh(() => { bindHeaders(); apply(); });
+</script>
+{% endblock %}

@@ -1,0 +1,63 @@
+{% import "_vc_group.html" as vc %}
+{% import "_alert_badge.html" as ab %}
+{% if groups %}
+{% for g in groups %}
+{% call vc.section(g, '台主機') %}
+  {% for c in g.cards %}
+  <div class="vcard {{ 'attention-' ~ c.alert_level if c.alert_level else '' }}" data-search="{{ c.search }}"
+       data-key="{{ c.key }}" data-title="{{ (c.name ~ ' ' ~ c.vc ~ ' ' ~ c.cluster)|lower }}">
+    <div class="vcard-head head-compute">
+      <div class="vcard-title">
+        <span class="hl" title="{{ c.name }}">{{ c.name }}</span>
+        {{ ab.badge(c.alerts) }}
+        {% if c.maintenance %}<span class="badge badge-warn">維護模式</span>{% endif %}
+        {% if c.connection_state and c.connection_state != 'connected' %}
+          <span class="badge badge-deny">{{ c.connection_state }}</span>{% endif %}
+        {% if c.overall_status in ('yellow', 'red') %}
+          <span class="badge {{ 'badge-red' if c.overall_status == 'red' else 'badge-yellow' }}" title="vCenter 對此主機的整體健康狀態(overallStatus),非 VCOD 負載判定{% if c.health_issues %}&#10;原因:{% for i in c.health_issues %}&#10;• {{ i }}{% endfor %}{% else %}&#10;vCenter 未列出具體原因(可能為已確認的告警或稍後才更新){% endif %}">主機健康狀態 : {{ c.overall_status }}</span>{% endif %}
+      </div>
+      <div class="vcard-sub">{% if c.cluster %}{{ c.cluster }}{% else %}獨立主機{% endif %}</div>
+    </div>
+    <div class="vcard-body">
+      <div>
+        <div class="meter-l"><b>CPU</b>
+          <span class="tier-{{ c.cpu_pct|usage_tier }}"><b>{{ c.cpu_pct }}%</b></span>
+          <span class="muted">{{ c.cpu_usage_mhz|ghz }} / {{ c.cpu_total_mhz|ghz }} GHz</span>
+          <span class="muted right">{{ c.num_cores }} 核心 / {{ c.num_threads }} 執行緒</span></div>
+        <div class="pbar {{ c.cpu_pct|usage_tier }}"><div style="width:{{ c.cpu_pct }}%;"></div></div>
+      </div>
+      <div>
+        <div class="meter-l"><b>記憶體</b>
+          <span class="tier-{{ c.mem_pct|usage_tier }}"><b>{{ c.mem_pct }}%</b></span>
+          <span class="muted">{{ (c.mem_usage_mb / 1024)|gb }} / {{ (c.mem_total_mb / 1024)|gb }} GB</span></div>
+        <div class="pbar {{ c.mem_pct|usage_tier }}"><div style="width:{{ c.mem_pct }}%;"></div></div>
+      </div>
+      <div class="kv">
+        {% if c.model %}<div title="{{ c.model }}">型號:{{ c.model }}</div>{% endif %}
+        {% if c.cpu_model %}<div title="{{ c.cpu_model }}">處理器:{{ c.cpu_model }}</div>{% endif %}
+        <div>{% if c.version %}{{ c.version }}{% endif %}{% if c.uptime_days %} · 運作 {{ c.uptime_days }} 天{% endif %}</div>
+      </div>
+    </div>
+    <div class="vcard-list-head"><span>Virtual Machines</span>
+      <span class="badge badge-muted">{{ c.vm_on }} / {{ c.vms|length }} 開機</span></div>
+    {% if c.vms %}
+    <div class="vm-list">
+      {% for v in c.vms %}
+      <div class="vm-row {{ '' if v.is_on else 'off' }}" data-search="{{ v.name|lower }}" data-key="{{ v.key }}"
+           title="{{ v.name }}&#10;vCPU:{{ v.num_cpu }} · RAM:{{ (v.memory_mb / 1024)|gb }} GB&#10;CPU 使用:{{ v.cpu_usage_mhz }} MHz({{ v.cpu_pct }}%{% if v.cpu_turbo %},已達上限、Turbo 中{% endif %})· Ready:{{ v.ready_pct }}%&#10;RAM 使用:{{ (v.mem_usage_mb / 1024)|gb }} GB{% if v.ballooned_mb or v.swapped_mb %} · balloon {{ v.ballooned_mb }} MB / swap {{ v.swapped_mb }} MB{% endif %}{% if v.snapshot_count or v.guest_os %}&#10;{% endif %}{% if v.snapshot_count %}&#10;快照 {{ v.snapshot_count }} 個,最舊 {{ v.snapshot_oldest_days }} 天{% endif %}{% if v.guest_os %}&#10;{{ v.guest_os }}{% endif %}">
+        <span class="dot {{ 'dot-ok' if v.is_on else 'dot-off' }}"></span>
+        <span class="vm-name hl">{{ v.name }}</span>
+        {{ ab.badge(v.alerts, compact=True) }}
+        {% if v.is_template %}<span class="badge badge-muted">範本</span>{% endif %}
+        <span class="vm-val mono">{{ v.cpu_usage_mhz }} MHz</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}<div class="empty">此主機上沒有 VM</div>{% endif %}
+  </div>
+  {% endfor %}
+{% endcall %}
+{% endfor %}
+{% else %}
+<div class="card"><p class="muted" style="margin:0;">尚無啟用的 vCenter — 請至「vCenter 管理」新增連線。</p></div>
+{% endif %}

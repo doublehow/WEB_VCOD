@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}運算 — VCOD{% endblock %}
+{% block page_title %}運算(ESXi 主機){% endblock %}
+{% block content %}
+<div class="filter-bar">
+  <input type="search" id="q" placeholder="搜尋主機 / 叢集 / VM…" style="width:280px;" autocomplete="off">
+  <span class="count" id="count"></span>
+  <span class="spacer"></span>
+  <label class="muted" style="font-size:12.5px;display:flex;align-items:center;gap:6px;">
+    <input type="checkbox" id="auto" checked style="width:auto;">自動更新</label>
+  <span class="muted" id="refresh-label" style="font-size:12px;"></span>
+</div>
+<div id="panel" data-snapshot="{{ snapshot }}">{% include "_panel_compute.html" %}</div>
+{% endblock %}
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+  const q = document.getElementById('q'), panel = document.getElementById('panel');
+  const apply = () => { if (vcodFocus(panel)) return; vcodFilterCards(panel, q.value); };
+  q.addEventListener('input', () => { vcodClearFocus(); apply(); });
+  vcodBindGroups(panel); apply();
+  vcodAutoRefresh(() => { vcodBindGroups(panel); apply(); });
+</script>
+{% endblock %}

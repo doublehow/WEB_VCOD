@@ -1,0 +1,53 @@
+{% import "_vc_group.html" as vc %}
+{% import "_alert_badge.html" as ab %}
+{% if groups %}
+{% for g in groups %}
+{% call vc.section(g, '個儲存區') %}
+  {% for c in g.cards %}
+  <div class="vcard {{ 'attention-' ~ c.alert_level if c.alert_level else '' }}" data-search="{{ c.search }}"
+       data-key="{{ c.key }}" data-title="{{ (c.name ~ ' ' ~ c.vc)|lower }}">
+    <div class="vcard-head head-storage">
+      <div class="vcard-title">
+        <span class="hl" title="{{ c.name }}">{{ c.name }}</span>
+        {{ ab.badge(c.alerts) }}
+        {% if c.type %}<span class="badge" style="background:rgba(255,255,255,.18);color:#fff;">{{ c.type }}</span>{% endif %}
+        {% if not c.accessible %}<span class="badge badge-deny">無法存取</span>{% endif %}
+      </div>
+      <div class="vcard-sub">掛載 {{ c.host_count }} 台主機</div>
+    </div>
+    <div class="vcard-body">
+      <div>
+        <div class="meter-l"><b>容量</b>
+          <span class="tier-{{ c.used_pct|usage_tier }}"><b>{{ c.used_pct }}%</b></span>
+          <span class="muted">{{ c.used_gb|gb }} / {{ c.capacity_gb|gb }} GB</span>
+          <span class="muted right">剩餘 {{ c.free_gb|gb }} GB</span></div>
+        <div class="pbar {{ c.used_pct|usage_tier }}"><div style="width:{{ c.used_pct }}%;"></div></div>
+      </div>
+      <div class="kv"><div>佈建量 {{ c.provisioned_gb|gb }} GB
+        {% if c.capacity_gb and c.provisioned_gb > c.capacity_gb %}
+          <span class="badge badge-warn" style="font-size:11px;">超額佈建 {{ ((c.provisioned_gb / c.capacity_gb) * 100)|round|int }}%</span>{% endif %}</div></div>
+    </div>
+    <div class="vcard-list-head"><span>Virtual Machines</span>
+      <span class="badge badge-muted">{{ c.vms|length }} 台</span></div>
+    {% if c.vms %}
+    <div class="vm-list">
+      {% for v in c.vms %}
+      <div class="vm-row {{ '' if v.is_on else 'off' }}" data-search="{{ v.name|lower }}" data-key="{{ v.key }}"
+           title="{{ v.name }}&#10;Datastore 佔用 {{ v.disk_committed_gb|gb }} GB · 佈建 {{ v.disk_provisioned_gb|gb }} GB{% if v.guest_disks %}&#10;&#10;Guest 檔案系統(Tools 回報):{% for d in v.guest_disks %}&#10;  {{ d.path }} {{ d.used_gb|gb }} / {{ d.capacity_gb|gb }} GB({{ d.pct }}%){% endfor %}{% endif %}{% if v.vmdks or v.isos %}&#10;{% endif %}{% for f in v.vmdks %}&#10;{{ f }}{% endfor %}{% for i in v.isos %}&#10;光碟 {{ i.path }}({{ '已連線' if i.connected else '未連線' }}){% endfor %}">
+        <span class="dot {{ 'dot-ok' if v.is_on else 'dot-off' }}"></span>
+        <span class="vm-name hl">{{ v.name }}</span>
+        {{ ab.badge(v.alerts, compact=True) }}
+        {% if v.datastores|length > 1 %}<span class="badge badge-muted" title="跨 {{ v.datastores|length }} 個儲存區(含 .vmx / swap / ISO 所在):{{ v.datastores|join('、') }}">×{{ v.datastores|length }}</span>{% endif %}
+        {% if v.guest_disk_max_pct is not none %}<span class="mono tier-{{ v.guest_disk_max_pct|usage_tier }}" style="font-size:11px;flex-shrink:0;" title="Guest 最高掛載點用量">G {{ v.guest_disk_max_pct|round|int }}%</span>{% endif %}
+        <span class="vm-val mono">{{ v.disk_committed_gb|gb }} GB</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}<div class="empty">沒有 VM 使用此儲存區</div>{% endif %}
+  </div>
+  {% endfor %}
+{% endcall %}
+{% endfor %}
+{% else %}
+<div class="card"><p class="muted" style="margin:0;">尚無啟用的 vCenter — 請至「vCenter 管理」新增連線。</p></div>
+{% endif %}
